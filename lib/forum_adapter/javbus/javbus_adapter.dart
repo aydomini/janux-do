@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:dio/dio.dart';
 
 import '../../constants.dart';
@@ -44,33 +46,98 @@ class JavbusAdapter extends ForumAdapter {
   final ForumDisplayParser _forumDisplayParser;
   final ViewThreadParser _viewThreadParser;
   final Map<String, String> _cookies = {};
+  String? _lastDesktopReferer; // 跟踪上一次桌面版请求 URL，作为 Referer
 
-  static const String mobileUserAgent =
-      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
-      'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 '
-      'Mobile/15E148 Safari/604.1';
+  /// 构建随机化 iPhone Safari UA（iOS 17-18.x），每次启动不同
+  static String _buildMobileUserAgent() {
+    final iosMajor = 17 + Random().nextInt(2); // 17-18
+    final iosMinor = Random().nextInt(6); // 0-5
+    // 使用十六进制构建号，避免 Dart 科学计数法
+    final build = (0x15E100 + Random().nextInt(0xC8))
+        .toRadixString(16)
+        .toUpperCase();
+    final safariBuild = 600 + Random().nextInt(50);
+    return 'Mozilla/5.0 (iPhone; CPU iPhone OS ${iosMajor}_$iosMinor like Mac OS X) '
+        'AppleWebKit/605.1.15 (KHTML, like Gecko) '
+        'Version/$iosMajor.$iosMinor Mobile/${build}A '
+        'Safari/$safariBuild.1.15';
+  }
 
-  static const String desktopUserAgent =
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 14.6; rv:127.0) '
-      'Gecko/20100101 Firefox/127.0';
+  late final String mobileUserAgent = _buildMobileUserAgent();
 
-  @override
-  Future<List<ForumForum>> getForums() async {
+  /// 构建随机化 Firefox UA（136-140 之间），每次启动不同
+  static String _buildDesktopUserAgent() {
+    final major = 136 + Random().nextInt(5); // 136-140
+    final minor = Random().nextInt(10); // 0-9
+    final rv = '$major.$minor';
+    return 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14.6; rv:$rv) '
+        'Gecko/20100101 Firefox/$rv';
+  }
+
+  late final String desktopUserAgent = _buildDesktopUserAgent();
+
+  /// 从持久化 CookieJar 恢复会话 cookie，避免每次启动都重新预热
+  Future<void> _initCookies(Uri uri) async {
+    if (_cookies.isNotEmpty) return;
+    try {
+      final canonical = await CookieJarService()
+          .loadCanonicalCookiesForRequest(uri);
+      for (final c in canonical) {
+        final value = c.value;
+        if (value.isNotEmpty) _cookies[c.name] = value;
+      }
+    } catch (_) {}
+  }
+
+  /// 模拟真人预热：首页 → 延迟 → 论坛首页，获取 session/cookie
+  Future<String> _warmUp({bool restoreCookies = true}) async {
     final siteHomeUri = _apiMapper.siteHome();
+    if (restoreCookies) await _initCookies(siteHomeUri);
     await _getHtml(
       siteHomeUri,
       userAgent: desktopUserAgent,
       browserNavigation: true,
     );
+    _lastDesktopReferer = siteHomeUri.toString();
+    // 模拟真人浏览延迟：200-500ms
+    await Future.delayed(
+      Duration(milliseconds: 200 + Random().nextInt(300)),
+    );
     final forumHomeUri = _apiMapper.forumHome();
     final html = await _getHtml(
       forumHomeUri,
       userAgent: desktopUserAgent,
-      referer: siteHomeUri.toString(),
+      referer: _lastDesktopReferer,
       browserNavigation: true,
     );
+    _lastDesktopReferer = forumHomeUri.toString();
     JavBusUrlBuilder.detectUcHostFromHtml(html);
-    return _forumIndexParser.parse(html, requestUrl: forumHomeUri.toString());
+    return html;
+  }
+
+  @override
+  Future<List<ForumForum>> getForums() async {
+    var restoreCookies = true;
+    // 预热：如果返回年龄验证页面，说明 cookie 过期，重新预热
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        final html = await _warmUp(restoreCookies: restoreCookies);
+        return _forumIndexParser.parse(
+          html,
+          requestUrl: _lastDesktopReferer!,
+        );
+      } on ForumResponseException catch (e) {
+        // 年龄验证页面：清空过期 cookie，下次不恢复，重新获取
+        if (e.statusCode == 200 && attempt < 1) {
+          _cookies.clear();
+          _commentsCache.clear();
+          restoreCookies = false;
+          continue;
+        }
+        rethrow;
+      }
+    }
+    throw StateError('预热失败');
   }
 
   @override
@@ -89,8 +156,10 @@ class JavbusAdapter extends ForumAdapter {
     final html = await _getHtml(
       uri,
       userAgent: desktopUserAgent,
+      referer: _lastDesktopReferer,
       browserNavigation: true,
     );
+    _lastDesktopReferer = uri.toString();
     return _forumDisplayParser.parse(
       html,
       forumId: forumId,
@@ -99,31 +168,13 @@ class JavbusAdapter extends ForumAdapter {
   }
 
   @override
-  Future<Map<int, int>> getThreadViewCounts(int forumId, {int page = 1}) async {
-    // getThreads 已使用桌面版 URL 直接获取浏览量
-    // 此方法作为精度增强，从 normalthread_XXX 行元素中提取精确浏览量
-    final uri = _apiMapper.desktopForumDisplay(
-      fid: forumId,
-      page: page,
-    );
-    try {
-      final html = await _getHtml(
-        uri,
-        userAgent: desktopUserAgent,
-        browserNavigation: true,
-      );
-      return ForumDisplayParser.parseThreadViews(html);
-    } on DioException {
-      return {};
-    } on ForumException {
-      return {};
-    }
-  }
-
-  @override
   Future<PostListResult> getPosts({required int threadId, int page = 1}) async {
     final uri = _apiMapper.viewThread(tid: threadId, page: page);
-    final html = await _getHtml(uri, userAgent: mobileUserAgent);
+    final html = await _getHtml(
+      uri,
+      userAgent: mobileUserAgent,
+      referer: _lastDesktopReferer,
+    );
     return _viewThreadParser.parse(
       html,
       threadId: threadId,
@@ -131,23 +182,35 @@ class JavbusAdapter extends ForumAdapter {
     );
   }
 
+  final Map<String, Map<int, List<ForumComment>>> _commentsCache = {};
+
+  String _commentCacheKey(int threadId, int page) => '$threadId-$page';
+
   @override
   Future<Map<int, List<ForumComment>>> getComments(int threadId, {int page = 1}) async {
+    final key = _commentCacheKey(threadId, page);
+    if (_commentsCache.containsKey(key)) return _commentsCache[key]!;
+
     final uri = _apiMapper.desktopViewThread(tid: threadId, page: page);
     try {
       final html = await _getHtml(
         uri,
         userAgent: desktopUserAgent,
+        referer: _lastDesktopReferer,
         browserNavigation: true,
       );
+      _lastDesktopReferer = uri.toString();
       // 解析第 1 页点评
       final allComments = ViewThreadParser.parseComments(html);
       // 检查哪些帖子有更多点评页
       final pagination = ViewThreadParser.parseCommentPagination(html);
-      // 逐帖逐页抓取点评
+      // 逐帖逐页抓取点评，模拟真人翻页间隔
       for (final entry in pagination.entries) {
         final pid = entry.key;
         for (var cp = 2; cp <= entry.value; cp++) {
+          await Future.delayed(
+            Duration(milliseconds: 150 + Random().nextInt(250)),
+          );
           try {
             final moreUri = _apiMapper.commentMore(
               tid: threadId,
@@ -157,6 +220,7 @@ class JavbusAdapter extends ForumAdapter {
             final moreHtml = await _getHtml(
               moreUri,
               userAgent: desktopUserAgent,
+              referer: _lastDesktopReferer,
               browserNavigation: true,
             );
             final moreComments = ViewThreadParser.parseComments(
@@ -173,6 +237,7 @@ class JavbusAdapter extends ForumAdapter {
           }
         }
       }
+      _commentsCache[key] = allComments;
       return allComments;
     } on DioException {
       return {};
@@ -222,16 +287,26 @@ class JavbusAdapter extends ForumAdapter {
           headers: {
             'User-Agent': userAgent,
             'Accept':
-                'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            if (browserNavigation) ...const {
-              'Accept-Language': 'zh-CN',
+                'text/html,application/xhtml+xml,application/xml;q=0.9,'
+                'image/avif,image/webp,*/*;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.5',
+            'Connection': 'keep-alive',
+            'DNT': '1',
+            if (browserNavigation) ...{
               'Sec-Fetch-Dest': 'document',
               'Sec-Fetch-Mode': 'navigate',
-              'Sec-Fetch-Site': 'none',
+              // 同站跳转用 same-origin，直接打开用 none
+              if (referer != null &&
+                  _isSameOrigin(referer!, uri.toString()))
+                'Sec-Fetch-Site': 'same-origin'
+              else
+                'Sec-Fetch-Site': 'none',
               'Sec-Fetch-User': '?1',
               'Upgrade-Insecure-Requests': '1',
+              'Cache-Control': 'max-age=0',
             },
-            'Referer': ?referer,
+            if (referer != null) 'Referer': referer,
             if (_cookies.isNotEmpty) 'Cookie': _cookieHeader(),
           },
         ),
@@ -307,6 +382,17 @@ class JavbusAdapter extends ForumAdapter {
     return html.contains('Age Verification JavBus') ||
         html.contains('你是否已經成年') ||
         html.contains('/doc/driver-verify');
+  }
+
+  /// 判断两个 URL 是否同源（scheme + host 一致）
+  static bool _isSameOrigin(String urlA, String urlB) {
+    try {
+      final a = Uri.parse(urlA);
+      final b = Uri.parse(urlB);
+      return a.scheme == b.scheme && a.host == b.host;
+    } catch (_) {
+      return false;
+    }
   }
 
   static String _snippet(String text, {int maxLength = 300}) {

@@ -19,11 +19,6 @@ abstract class ForumAdapter {
     return {};
   }
 
-  /// 获取帖子浏览量（从桌面版 HTML 解析 .views 元素）
-  Future<Map<int, int>> getThreadViewCounts(int forumId, {int page = 1}) async {
-    return {};
-  }
-
   Future<void> login({
     required String username,
     required String password,

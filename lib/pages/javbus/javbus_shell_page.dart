@@ -438,8 +438,6 @@ class _ThreadListPaneState extends ConsumerState<_ThreadListPane> {
   bool _isLoadingMore = false;
   Object? _error;
   StackTrace? _stackTrace;
-  final Map<int, int> _viewCounts = {};
-
   @override
   void initState() {
     super.initState();
@@ -488,9 +486,6 @@ class _ThreadListPaneState extends ConsumerState<_ThreadListPane> {
     _threads
       ..clear()
       ..addAll(widget.cache.threads);
-    _viewCounts
-      ..clear()
-      ..addAll(widget.cache.viewCounts);
     _currentPage = widget.cache.currentPage;
     _totalPages = widget.cache.totalPages;
     _hasNextPage = widget.cache.hasNextPage;
@@ -514,9 +509,6 @@ class _ThreadListPaneState extends ConsumerState<_ThreadListPane> {
     widget.cache.threads
       ..clear()
       ..addAll(_threads);
-    widget.cache.viewCounts
-      ..clear()
-      ..addAll(_viewCounts);
     widget.cache
       ..currentPage = _currentPage
       ..totalPages = _totalPages
@@ -544,7 +536,6 @@ class _ThreadListPaneState extends ConsumerState<_ThreadListPane> {
         _threads
           ..clear()
           ..addAll(result.threads);
-        _viewCounts.clear();
         _currentPage = result.currentPage;
         _totalPages = result.totalPages;
         _hasNextPage = result.hasNextPage;
@@ -658,7 +649,6 @@ class _ThreadListPaneState extends ConsumerState<_ThreadListPane> {
 
 class _ThreadListPaneCache {
   final List<ForumThread> threads = [];
-  final Map<int, int> viewCounts = {};
   int currentPage = 1;
   int totalPages = 1;
   bool hasNextPage = true;

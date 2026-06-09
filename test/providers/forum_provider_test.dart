@@ -101,13 +101,10 @@ void main() {
       );
       addTearDown(container.dispose);
 
+      final adapter = container.read(forumAdapterProvider);
       final forums = await container.read(forumListProvider.future);
-      final threads = await container.read(
-        threadListProvider(const ThreadListParams(forumId: 2, page: 1)).future,
-      );
-      final posts = await container.read(
-        postListProvider(const PostListParams(threadId: 1001, page: 1)).future,
-      );
+      final threads = await adapter.getThreads(forumId: 2);
+      final posts = await adapter.getPosts(threadId: 1001);
 
       expect(forums.single.name, '有码讨论');
       expect(threads.threads.single.threadId, 1001);

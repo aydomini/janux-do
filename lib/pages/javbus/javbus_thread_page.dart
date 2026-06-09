@@ -207,7 +207,6 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
       setState(() {
         final addedPostCount = _mergePosts(result.posts);
         _trackThreadAuthor();
-        ImageHeaderService.instance.refresh();
         _currentPage = result.currentPage < requestedPage
             ? requestedPage
             : result.currentPage;
@@ -244,14 +243,21 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
     );
   }
 
+  final Set<int> _loadedCommentPages = {};
+
   Future<void> _loadComments(int page) async {
+    // 已加载过的点评页跳过，避免重复请求
+    if (!_loadedCommentPages.add(page)) return;
     try {
       final comments = await ref
           .read(forumAdapterProvider)
           .getComments(widget.threadId, page: page);
       if (!mounted) return;
       setState(() => _comments.addAll(comments));
-    } catch (_) {}
+    } catch (_) {
+      // 失败时移除标记，允许重试
+      _loadedCommentPages.remove(page);
+    }
   }
 
   void _trackThreadAuthor() {
