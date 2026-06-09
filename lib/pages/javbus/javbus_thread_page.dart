@@ -9,6 +9,7 @@ import '../../forum_adapter/models/forum_post.dart';
 import '../../providers/forum_provider.dart';
 import '../../services/highlighter_service.dart';
 import '../../services/javbus_cache_manager.dart';
+import '../../services/network/cookie/cookie_jar_service.dart';
 import '../../theme/app_semantic_colors.dart';
 import '../../theme/app_typography.dart';
 import '../../utils/link_launcher.dart';
@@ -1090,17 +1091,52 @@ bool _isInlineEmojiImage(dom.Element element, String resolvedUrl) {
   return width <= 48 && height <= 48;
 }
 
-class _PostAvatar extends StatelessWidget {
+class _PostAvatar extends StatefulWidget {
   const _PostAvatar({required this.avatarUrl});
 
   final String? avatarUrl;
 
   @override
+  State<_PostAvatar> createState() => _PostAvatarState();
+}
+
+class _PostAvatarState extends State<_PostAvatar> {
+  String? _cookieHeader;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCookieHeader();
+  }
+
+  Future<void> _loadCookieHeader() async {
+    try {
+      final jar = CookieJarService();
+      if (!jar.isInitialized) await jar.initialize();
+      final cfClearance = await jar.getCfClearance();
+      if (cfClearance != null && cfClearance.isNotEmpty && mounted) {
+        setState(() => _cookieHeader = 'cf_clearance=$cfClearance');
+      }
+    } catch (_) {}
+  }
+
+  Map<String, String> _buildHeaders() {
+    return {
+      'User-Agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/605.1.15 '
+              '(KHTML, like Gecko) Version/17.5 Safari/605.1.15',
+      'Referer': 'https://www.javbus.com/forum/',
+      if (_cookieHeader != null) 'Cookie': _cookieHeader!,
+    };
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     const double size = 56;
+    final url = widget.avatarUrl;
 
-    if (avatarUrl == null || avatarUrl!.isEmpty) {
+    if (url == null || url.isEmpty) {
       return CircleAvatar(
         radius: size / 2,
         backgroundColor: theme.colorScheme.primaryContainer,
@@ -1113,8 +1149,8 @@ class _PostAvatar extends StatelessWidget {
       height: size,
       child: ClipOval(
         child: CachedNetworkImage(
-          imageUrl: avatarUrl!,
-          httpHeaders: JavBusPostImage.avatarHeaders,
+          imageUrl: url,
+          httpHeaders: _buildHeaders(),
           cacheManager: JavBusAvatarCacheManager(),
           fit: BoxFit.cover,
           placeholder: (context, url) => Container(
