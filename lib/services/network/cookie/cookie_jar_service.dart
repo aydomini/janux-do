@@ -62,7 +62,7 @@ class CookieJarService {
     if (_initialized) return;
 
     try {
-      final directory = await getApplicationDocumentsDirectory();
+      final directory = await getApplicationSupportDirectory();
       final cookiePath = path.join(directory.path, '.cookies');
 
       final cookieDir = io.Directory(cookiePath);

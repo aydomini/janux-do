@@ -20,6 +20,12 @@ class PostHtmlCleaner {
       _removeLowContrastTextColor(element);
     }
 
+    // 删除 blockquote 内 font 标签的 size 属性，使其继承父级字号
+    // 解决 Discuz! 引用块中 "引用:xxx 發表於 xxx" 字体过小的问题
+    for (final fontElement in fragment.querySelectorAll('blockquote font[size]')) {
+      fontElement.attributes.remove('size');
+    }
+
     for (final image in fragment.querySelectorAll('img')) {
       final file = _firstNonEmptyAttribute(image, [
         'file',

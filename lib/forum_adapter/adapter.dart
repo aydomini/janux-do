@@ -1,5 +1,6 @@
 import 'exceptions.dart';
 import 'models/forum_forum.dart';
+import 'models/forum_post.dart';
 import 'models/forum_results.dart';
 
 abstract class ForumAdapter {
@@ -12,6 +13,16 @@ abstract class ForumAdapter {
   });
 
   Future<PostListResult> getPosts({required int threadId, int page = 1});
+
+  /// 获取楼中楼点评（从桌面版 HTML 解析 pstl 块）
+  Future<Map<int, List<ForumComment>>> getComments(int threadId, {int page = 1}) async {
+    return {};
+  }
+
+  /// 获取帖子浏览量（从桌面版 HTML 解析 .views 元素）
+  Future<Map<int, int>> getThreadViewCounts(int forumId, {int page = 1}) async {
+    return {};
+  }
 
   Future<void> login({
     required String username,

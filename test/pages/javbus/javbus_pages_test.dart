@@ -197,13 +197,14 @@ void main() {
 
   test('JavBus 桌面布局尺寸与 FluxDO 两栏体验保持收敛', () {
     expect(JavBusLayout.compactBreakpoint, 860);
-    expect(JavBusLayout.sidebarWidth, 288);
+    expect(JavBusLayout.sidebarWidth, 300);
     expect(JavBusLayout.contentMaxWidth, 920);
-    expect(JavBusLayout.postMetaColumnWidth, 112);
-    expect(JavBusLayout.topicReplyColumnWidth, 84);
-    expect(JavBusLayout.topicTimeColumnWidth, 132);
-    expect(JavBusLayout.mediaPreviewMaxWidth, 460);
-    expect(JavBusLayout.mediaPreviewHeight, 300);
+    expect(JavBusLayout.postMetaColumnWidth, 150);
+    expect(JavBusLayout.topicReplyColumnWidth, 100);
+    expect(JavBusLayout.topicViewsColumnWidth, 100);
+    expect(JavBusLayout.topicTimeColumnWidth, 150);
+    expect(JavBusLayout.mediaPreviewMaxWidth, 480);
+    expect(JavBusLayout.mediaPreviewHeight, 270);
   });
 
   testWidgets('JavBus 首页使用桌面双栏展示分区和帖子列表', (tester) async {
@@ -220,6 +221,7 @@ void main() {
     expect(find.text('普通主题 P1'), findsOneWidget);
     expect(find.textContaining('天前'), findsOneWidget);
     expect(find.text('话题'), findsOneWidget);
+    expect(find.text('浏览'), findsOneWidget);
     expect(find.text('回复'), findsOneWidget);
     expect(find.text('时间'), findsOneWidget);
     expect(find.byType(JavBusForumPage), findsNothing);
@@ -406,7 +408,7 @@ void main() {
     expect(find.text('普通主题'), findsWidgets);
     expect(find.textContaining('#1'), findsOneWidget);
     expect(find.byKey(const ValueKey('javbus-post-meta-1')), findsOneWidget);
-    expect(find.textContaining('2026'), findsOneWidget);
+    expect(find.textContaining('月'), findsWidgets);
     expect(find.textContaining('已加载'), findsNothing);
     expect(find.text('楼主'), findsWidgets);
     expect(find.textContaining('正文内容', findRichText: true), findsOneWidget);

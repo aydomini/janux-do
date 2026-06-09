@@ -472,6 +472,87 @@ bool _isPaginationElement(Element element) {
       element.querySelector('.pg') != null;
 }
 
+  /// 从桌面版 HTML 中解析楼中楼点评（pstl 块），按帖子 pid 分组
+  static Map<int, List<ForumComment>> parseComments(String html) {
+    final document = html_parser.parse(html);
+    final results = <int, List<ForumComment>>{};
+
+    // 匹配每个 pstl 块：作者信息在 .psta，正文和时间在 .psti
+    final pstlBlocks = document.querySelectorAll('.pstl');
+    for (final block in pstlBlocks) {
+      final pid = _findParentPid(block);
+      if (pid == null) continue;
+
+      final psta = block.querySelector('.psta');
+      final psti = block.querySelector('.psti');
+
+      final authorLink = psta?.querySelector('a[href*="uid="]');
+      final authorName = authorLink?.text.trim() ?? '';
+      final authorId = _extractQueryInt(authorLink?.attributes['href'] ?? '');
+      final avatarImg = psta?.querySelector('img[src]');
+      final avatarUrl = avatarImg?.attributes['src']?.trim();
+
+      // 提取正文：移除 .xg1 时间标签后的纯文本
+      final timeSpan = psti?.querySelector('.xg1');
+      timeSpan?.remove();
+      final content = psti?.text.trim() ?? '';
+
+      // 提取时间
+      DateTime? createdAt;
+      if (timeSpan != null) {
+        final timeText = timeSpan.text.trim();
+        final timeMatch = RegExp(
+          r'(\d{4}-\d{1,2}-\d{1,2}\s+\d{2}:\d{2})',
+        ).firstMatch(timeText);
+        if (timeMatch != null) {
+          createdAt = DateTime.tryParse(timeMatch.group(1)!);
+        }
+      }
+
+      if (authorName.isEmpty && content.isEmpty) continue;
+
+      results.putIfAbsent(pid, () => []).add(
+        ForumComment(
+          author: authorName,
+          authorId: authorId,
+          avatarUrl: avatarUrl?.isNotEmpty == true ? avatarUrl : null,
+          content: content,
+          createdAt: createdAt,
+        ),
+      );
+    }
+
+    return results;
+  }
+
+  /// 向上查找 pstl 块所属的帖子 pid
+  static int? _findParentPid(Element element) {
+    Element? current = element.parent;
+    while (current != null) {
+      // 查找兄弟或祖先元素中的帖子 ID 标记
+      final idAttr =
+          current.attributes['id'] ??
+          current.querySelector('[id^="pid"]')?.attributes['id'];
+      if (idAttr != null) {
+        final pidMatch = RegExp(r'^pid(\d+)$').firstMatch(idAttr);
+        if (pidMatch != null) {
+          return int.tryParse(pidMatch.group(1)!);
+        }
+      }
+      // 检查当前元素内部是否有 pid 链接
+      final pidLink = current.querySelector('a[id^="pid"]');
+      if (pidLink != null) {
+        final href = pidLink.attributes['id'] ?? '';
+        final pidMatch = RegExp(r'^pid(\d+)$').firstMatch(href);
+        if (pidMatch != null) {
+          return int.tryParse(pidMatch.group(1)!);
+        }
+      }
+      current = current.parent;
+    }
+    return null;
+  }
+
 class _PostScope {
   const _PostScope({required this.anchor, required this.container});
 

@@ -46,7 +46,7 @@ class CacheSizeService {
 
   /// 计算 Cookie 缓存大小
   static Future<int> getCookieCacheSize() async {
-    final docDir = await getApplicationDocumentsDirectory();
+    final docDir = await getApplicationSupportDirectory();
     return _getDirectorySize(Directory('${docDir.path}/.cookies'));
   }
 

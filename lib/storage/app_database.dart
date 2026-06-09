@@ -87,7 +87,7 @@ class AppDatabase {
         'AppDatabase 暂不支持 Web 平台：书签本地缓存仅在移动端与桌面端启用。',
       );
     }
-    final directory = await getApplicationDocumentsDirectory();
+    final directory = await getApplicationSupportDirectory();
     Hive.init(p.join(directory.path, 'hive'));
     _initialized = true;
   }

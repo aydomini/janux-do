@@ -263,7 +263,7 @@ class _ForumSidebar extends StatelessWidget {
                       'JANUX DO',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleLarge?.copyWith(
+                      style: theme.textTheme.headlineSmall?.copyWith(
                         fontWeight: FontWeight.w800,
                       ),
                     ),
@@ -273,7 +273,7 @@ class _ForumSidebar extends StatelessWidget {
             ),
             const SizedBox(height: 20),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
+              padding: const EdgeInsets.fromLTRB(58, 0, 14, 0),
               child: Text(
                 '分区',
                 style: theme.textTheme.bodyMedium?.copyWith(
@@ -382,7 +382,7 @@ class _ForumNavItem extends StatelessWidget {
                         forum.name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleSmall?.copyWith(
+                        style: theme.textTheme.bodyLarge?.copyWith(
                           fontWeight: selected
                               ? FontWeight.w800
                               : FontWeight.w600,
@@ -394,7 +394,7 @@ class _ForumNavItem extends StatelessWidget {
                           subtitle,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall?.copyWith(
+                          style: theme.textTheme.bodyMedium?.copyWith(
                             color: theme.colorScheme.onSurfaceVariant,
                           ),
                         ),
@@ -437,6 +437,7 @@ class _ThreadListPaneState extends ConsumerState<_ThreadListPane> {
   bool _isLoadingMore = false;
   Object? _error;
   StackTrace? _stackTrace;
+  final Map<int, int> _viewCounts = {};
 
   @override
   void initState() {
@@ -486,6 +487,9 @@ class _ThreadListPaneState extends ConsumerState<_ThreadListPane> {
     _threads
       ..clear()
       ..addAll(widget.cache.threads);
+    _viewCounts
+      ..clear()
+      ..addAll(widget.cache.viewCounts);
     _currentPage = widget.cache.currentPage;
     _totalPages = widget.cache.totalPages;
     _hasNextPage = widget.cache.hasNextPage;
@@ -509,6 +513,9 @@ class _ThreadListPaneState extends ConsumerState<_ThreadListPane> {
     widget.cache.threads
       ..clear()
       ..addAll(_threads);
+    widget.cache.viewCounts
+      ..clear()
+      ..addAll(_viewCounts);
     widget.cache
       ..currentPage = _currentPage
       ..totalPages = _totalPages
@@ -527,17 +534,24 @@ class _ThreadListPaneState extends ConsumerState<_ThreadListPane> {
       _stackTrace = null;
     });
     try {
-      final result = await ref
-          .read(forumAdapterProvider)
-          .getThreads(
-            forumId: widget.forum.forumId,
-            filterTypeId: widget.forum.filterTypeId,
-          );
+      final adapter = ref.read(forumAdapterProvider);
+      final results = await Future.wait([
+        adapter.getThreads(
+          forumId: widget.forum.forumId,
+          filterTypeId: widget.forum.filterTypeId,
+        ),
+        adapter.getThreadViewCounts(widget.forum.forumId),
+      ]);
       if (!mounted) return;
+      final result = results[0] as ThreadListResult;
+      final views = results[1] as Map<int, int>;
       setState(() {
         _threads
           ..clear()
           ..addAll(result.threads);
+        _viewCounts
+          ..clear()
+          ..addAll(views);
         _currentPage = result.currentPage;
         _totalPages = result.totalPages;
         _hasNextPage = result.hasNextPage;
@@ -557,19 +571,27 @@ class _ThreadListPaneState extends ConsumerState<_ThreadListPane> {
 
   Future<void> _loadNextPage() async {
     if (_isLoadingInitial || _isLoadingMore || !_hasNextPage) return;
+    final requestedPage = _currentPage + 1;
     setState(() => _isLoadingMore = true);
     try {
-      final result = await ref
-          .read(forumAdapterProvider)
-          .getThreads(
-            forumId: widget.forum.forumId,
-            filterTypeId: widget.forum.filterTypeId,
-            page: _currentPage + 1,
-          );
+      final adapter = ref.read(forumAdapterProvider);
+      final results = await Future.wait([
+        adapter.getThreads(
+          forumId: widget.forum.forumId,
+          filterTypeId: widget.forum.filterTypeId,
+          page: requestedPage,
+        ),
+        adapter.getThreadViewCounts(widget.forum.forumId, page: requestedPage),
+      ]);
       if (!mounted) return;
+      final result = results[0] as ThreadListResult;
+      final views = results[1] as Map<int, int>;
       setState(() {
         _threads.addAll(result.threads);
-        _currentPage = result.currentPage;
+        _viewCounts.addAll(views);
+        _currentPage = result.currentPage < requestedPage
+            ? requestedPage
+            : result.currentPage;
         _totalPages = result.totalPages;
         _hasNextPage = result.hasNextPage;
         _isLoadingMore = false;
@@ -649,6 +671,7 @@ class _ThreadListPaneState extends ConsumerState<_ThreadListPane> {
 
 class _ThreadListPaneCache {
   final List<ForumThread> threads = [];
+  final Map<int, int> viewCounts = {};
   int currentPage = 1;
   int totalPages = 1;
   bool hasNextPage = true;
@@ -730,13 +753,18 @@ class _ThreadTableHeader extends StatelessWidget {
           Expanded(child: Text('话题', style: labelStyle)),
           const SizedBox(width: 18),
           SizedBox(
+            width: JavBusLayout.topicViewsColumnWidth,
+            child: Text('浏览', textAlign: TextAlign.center, style: labelStyle),
+          ),
+          const SizedBox(width: 18),
+          SizedBox(
             width: JavBusLayout.topicReplyColumnWidth,
-            child: Text('回复', textAlign: TextAlign.right, style: labelStyle),
+            child: Text('回复', textAlign: TextAlign.center, style: labelStyle),
           ),
           const SizedBox(width: 24),
           SizedBox(
             width: JavBusLayout.topicTimeColumnWidth,
-            child: Text('时间', textAlign: TextAlign.right, style: labelStyle),
+            child: Text('时间', textAlign: TextAlign.center, style: labelStyle),
           ),
         ],
       ),
@@ -782,7 +810,7 @@ class _ThreadRow extends StatelessWidget {
                     thread.title,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleMedium?.copyWith(
+                    style: theme.textTheme.bodyLarge?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -805,10 +833,22 @@ class _ThreadRow extends StatelessWidget {
             ),
             const SizedBox(width: 18),
             SizedBox(
+              width: JavBusLayout.topicViewsColumnWidth,
+              child: Text(
+                _formatCount(_viewCounts[thread.threadId] ?? thread.views),
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            const SizedBox(width: 18),
+            SizedBox(
               width: JavBusLayout.topicReplyColumnWidth,
               child: Text(
-                '${thread.replies}',
-                textAlign: TextAlign.right,
+                _formatCount(thread.replies),
+                textAlign: TextAlign.center,
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.primary,
                   fontWeight: FontWeight.w800,
@@ -820,7 +860,7 @@ class _ThreadRow extends StatelessWidget {
               width: JavBusLayout.topicTimeColumnWidth,
               child: Text(
                 _formatThreadTime(thread.createdAt),
-                textAlign: TextAlign.right,
+                textAlign: TextAlign.center,
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                   fontWeight: FontWeight.w600,
@@ -984,7 +1024,7 @@ class _ThreadListFooter extends StatelessWidget {
                 hasNextPage
                     ? '继续向下滚动加载更多 · $currentPage / $totalPages'
                     : '已加载全部帖子',
-                style: theme.textTheme.bodySmall?.copyWith(
+                style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),
@@ -1004,7 +1044,7 @@ class _ShellEmptyState extends StatelessWidget {
     return Center(
       child: Text(
         message,
-        style: theme.textTheme.bodyLarge?.copyWith(
+        style: theme.textTheme.bodyMedium?.copyWith(
           color: theme.colorScheme.onSurfaceVariant,
         ),
       ),
@@ -1034,6 +1074,13 @@ String _forumSubtitle(ForumForum forum) {
   return forum.description?.trim() ?? '';
 }
 
+String _formatCount(int value) {
+  if (value <= 0) return '-';
+  if (value >= 10000) return '${(value / 10000).toStringAsFixed(1)}万';
+  if (value >= 1000) return '${(value / 1000).toStringAsFixed(1)}k';
+  return '$value';
+}
+
 String _formatThreadTime(DateTime? value) {
   if (value == null) return '';
   final now = DateTime.now();
@@ -1047,9 +1094,10 @@ String _formatThreadTime(DateTime? value) {
     return '${diff.inDays}天前';
   }
 
-  // 超过1周使用绝对时间（日期在上，时间在下）
+  // 超过1周显示日期
   String two(int input) => input.toString().padLeft(2, '0');
-  return '${value.year}-${two(value.month)}-${two(value.day)}\n'
-      '${two(value.hour)}:${two(value.minute)}';
+  return value.year == now.year
+      ? '${two(value.month)} 月 ${two(value.day)} 日'
+      : '${value.year} 年 ${two(value.month)} 月 ${two(value.day)} 日';
 }
 

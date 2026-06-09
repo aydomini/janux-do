@@ -6,6 +6,7 @@ import 'package:html/dom.dart' as dom;
 
 import '../../forum_adapter/javbus/utils/url_builder.dart';
 import '../../forum_adapter/models/forum_post.dart';
+import '../../forum_adapter/models/forum_results.dart';
 import '../../providers/forum_provider.dart';
 import '../../services/highlighter_service.dart';
 import '../../services/javbus_cache_manager.dart';
@@ -51,6 +52,7 @@ class _JavBusThreadPageState extends ConsumerState<JavBusThreadPage> {
 
 class JavBusThreadContentCache {
   final List<ForumPost> posts = [];
+  final Map<int, List<ForumComment>> comments = {};
   int currentPage = 1;
   bool hasNextPage = true;
   bool hasLoaded = false;
@@ -86,6 +88,7 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
   Object? _error;
   StackTrace? _stackTrace;
   int? _threadAuthorId;
+  Map<int, List<ForumComment>> _comments = {};
 
   @override
   void initState() {
@@ -119,6 +122,7 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
     _posts
       ..clear()
       ..addAll(_cache.posts);
+    _comments = Map<int, List<ForumComment>>.from(_cache.comments);
     _currentPage = _cache.currentPage;
     _hasNextPage = _cache.hasNextPage;
     _isLoadingInitial = false;
@@ -141,6 +145,9 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
     _cache.posts
       ..clear()
       ..addAll(_posts);
+    _cache.comments
+      ..clear()
+      ..addAll(_comments);
     _cache
       ..currentPage = _currentPage
       ..hasNextPage = _hasNextPage
@@ -174,6 +181,7 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
         _cache.scrollOffset = 0;
         _saveCache();
       });
+      _loadComments(1);
     } catch (error, stackTrace) {
       if (!mounted) return;
       setState(() {
@@ -210,6 +218,7 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
         _stackTrace = null;
         _saveCache();
       });
+      _loadComments(requestedPage);
     } catch (error, stackTrace) {
       if (!mounted) return;
       setState(() {
@@ -218,6 +227,16 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
         _isLoadingMore = false;
       });
     }
+  }
+
+  Future<void> _loadComments(int page) async {
+    try {
+      final comments = await ref
+          .read(forumAdapterProvider)
+          .getComments(widget.threadId, page: page);
+      if (!mounted) return;
+      setState(() => _comments.addAll(comments));
+    } catch (_) {}
   }
 
   void _trackThreadAuthor() {
@@ -304,10 +323,12 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
               final displayFloorNumber = post.floorNumber < postIndex + 1
                   ? postIndex + 1
                   : post.floorNumber;
+              final postComments = _comments[post.postId] ?? const <ForumComment>[];
               return _PostCard(
                 post: post,
                 displayFloorNumber: displayFloorNumber,
                 isThreadAuthor: _isPostByThreadAuthor(post),
+                comments: postComments,
               );
             },
           );
@@ -322,36 +343,41 @@ class _PostCard extends StatelessWidget {
     required this.post,
     required this.displayFloorNumber,
     required this.isThreadAuthor,
+    this.comments = const [],
   });
 
   final ForumPost post;
   final int displayFloorNumber;
   final bool isThreadAuthor;
+  final List<ForumComment> comments;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final avatarUrl = post.avatarUrl;
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(
-          maxWidth: JavBusLayout.contentMaxWidth,
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: _PostAvatar(avatarUrl: avatarUrl),
-              ),
-              const SizedBox(width: 18),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: _PostAvatar(avatarUrl: avatarUrl),
+          ),
+          const SizedBox(width: 18),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    maxWidth: JavBusLayout.textContentMaxWidth,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
                         Flexible(
@@ -359,7 +385,7 @@ class _PostCard extends StatelessWidget {
                             post.author,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.titleMedium?.copyWith(
+                            style: theme.textTheme.bodyLarge?.copyWith(
                               fontWeight: FontWeight.w800,
                             ),
                           ),
@@ -416,12 +442,19 @@ class _PostCard extends StatelessWidget {
                         ],
                       ),
                     ],
+                    if (comments.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      _CommentSection(comments: comments),
+                    ],
                   ],
                 ),
               ),
-              const SizedBox(width: 18),
-              SizedBox(
-                width: JavBusLayout.postMetaColumnWidth,
+            ],
+          ),
+        ),
+        const SizedBox(width: 18),
+        SizedBox(
+          width: JavBusLayout.postMetaColumnWidth,
                 child: _PostMetaColumn(
                   floorNumber: displayFloorNumber,
                   createdAt: post.createdAt,
@@ -430,7 +463,6 @@ class _PostCard extends StatelessWidget {
             ],
           ),
         ),
-      ),
     );
   }
 }
@@ -451,7 +483,7 @@ class _PostMetaColumn extends StatelessWidget {
         Text(
           '#$floorNumber',
           textAlign: TextAlign.right,
-          style: theme.textTheme.titleSmall?.copyWith(
+          style: theme.textTheme.bodyMedium?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
             fontWeight: FontWeight.w700,
           ),
@@ -499,9 +531,21 @@ class _AuthorBadge extends StatelessWidget {
 }
 
 String _formatPostMetaTime(DateTime value) {
+  final now = DateTime.now();
   String two(int input) => input.toString().padLeft(2, '0');
-  return '${value.year}-${two(value.month)}-${two(value.day)}\n'
-      '${two(value.hour)}:${two(value.minute)}';
+  final dateStr = value.year == now.year
+      ? '${two(value.month)} 月 ${two(value.day)} 日'
+      : '${value.year} 年 ${two(value.month)} 月 ${two(value.day)} 日';
+  return '$dateStr\n${two(value.hour)}:${two(value.minute)}';
+}
+
+String _formatCommentTime(DateTime value) {
+  final now = DateTime.now();
+  String two(int input) => input.toString().padLeft(2, '0');
+  final dateStr = value.year == now.year
+      ? '${two(value.month)} 月 ${two(value.day)} 日'
+      : '${value.year} 年 ${two(value.month)} 月 ${two(value.day)} 日';
+  return '$dateStr ${two(value.hour)}:${two(value.minute)}';
 }
 
 Widget? _buildJavBusHtmlWidget(
@@ -581,9 +625,6 @@ Map<String, String>? _buildJavBusHtmlStyles(
   }
   if (localName == 'li') {
     return {'margin': '4px 0'};
-  }
-  if (localName == 'font') {
-    return {'font-size': 'inherit'};
   }
   if (localName == 'code' && element.parent?.localName != 'pre') {
     return {
@@ -705,7 +746,7 @@ class _JavBusCodeBlockState extends State<JavBusCodeBlock> {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final baseStyle = HighlighterService.instance.firaCodeStyle.copyWith(
-      fontSize: 13.5,
+      fontSize: 14,
       height: 1.58,
       color: theme.colorScheme.onSurface,
     );
@@ -811,7 +852,6 @@ class JavBusQuoteBlock extends StatelessWidget {
               html,
               renderMode: RenderMode.column,
               textStyle: theme.textTheme.bodyLarge?.copyWith(
-                fontSize: AppTypography.readingBodyFontSize - 1,
                 height: 1.64,
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -1114,6 +1154,167 @@ class _PostAvatar extends StatelessWidget {
               color: theme.colorScheme.onPrimaryContainer,
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CommentSection extends StatefulWidget {
+  const _CommentSection({required this.comments});
+
+  final List<ForumComment> comments;
+
+  @override
+  State<_CommentSection> createState() => _CommentSectionState();
+}
+
+class _CommentSectionState extends State<_CommentSection> {
+  static const int _previewCount = 10;
+  bool _expanded = false;
+
+  List<ForumComment> get _visible {
+    final all = widget.comments;
+    if (all.length <= _previewCount || _expanded) return all;
+    return all.take(_previewCount).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final all = widget.comments;
+    final visible = _visible;
+    final hasMore = all.length > _previewCount;
+
+    final baseStyle = theme.textTheme.bodyMedium?.copyWith(
+      color: theme.colorScheme.onSurface,
+      height: 1.45,
+    );
+
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+      alignment: Alignment.topCenter,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest.withValues(
+            alpha: theme.brightness == Brightness.dark ? 0.28 : 0.42,
+          ),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '点评 (${all.length})',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 4),
+              ...visible.map((comment) => Padding(
+                padding: const EdgeInsets.only(top: 5),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: _CommentAvatar(avatarUrl: comment.avatarUrl),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  comment.author,
+                                  style: baseStyle?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
+                              if (comment.createdAt != null)
+                                Text(
+                                  _formatCommentTime(comment.createdAt!),
+                                  style: baseStyle?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant.
+                                        withValues(alpha: 0.72),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          Text(
+                            comment.content,
+                            style: baseStyle,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              )),
+              if (hasMore)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: GestureDetector(
+                    onTap: () => setState(() => _expanded = !_expanded),
+                    child: Text(
+                      _expanded
+                          ? '收起'
+                          : '展开剩余 ${all.length - _previewCount} 条点评',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 点评小头像（18px，对齐 14px 文字行高）
+class _CommentAvatar extends StatelessWidget {
+  const _CommentAvatar({required this.avatarUrl});
+
+  final String? avatarUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    const double size = 18;
+
+    if (avatarUrl == null || avatarUrl!.isEmpty) {
+      return Icon(
+        Icons.person_outline_rounded,
+        size: size,
+        color: theme.colorScheme.onSurfaceVariant,
+      );
+    }
+
+    return ClipOval(
+      child: CachedNetworkImage(
+        imageUrl: avatarUrl!,
+        httpHeaders: ImageHeaderService.instance.headers,
+        cacheManager: JavBusAvatarCacheManager(),
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        errorWidget: (_, __, ___) => Icon(
+          Icons.person_outline_rounded,
+          size: size,
+          color: theme.colorScheme.onSurfaceVariant,
         ),
       ),
     );

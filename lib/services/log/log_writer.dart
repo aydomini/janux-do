@@ -69,7 +69,7 @@ class LogWriter {
 
   /// 获取日志文件，包含旧文件迁移逻辑
   static Future<File> getLogFile() async {
-    final dir = await getApplicationDocumentsDirectory();
+    final dir = await getApplicationSupportDirectory();
     final logDir = Directory('${dir.path}/logs');
     if (!logDir.existsSync()) {
       await logDir.create(recursive: true);

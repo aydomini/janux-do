@@ -19,7 +19,7 @@ class NetworkLogger {
   static Future<void> _ensureInitialized({bool clearIfExists = false}) async {
     if (_initialized) return;
     try {
-      final dir = await getApplicationDocumentsDirectory();
+      final dir = await getApplicationSupportDirectory();
       final logDir = Directory('${dir.path}/logs');
       if (!await logDir.exists()) {
         await logDir.create(recursive: true);

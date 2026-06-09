@@ -30,6 +30,26 @@ class JavBusApiMapper {
     return _mobileApi({'module': 'viewthread', 'tid': '$tid', 'page': '$page'});
   }
 
+  /// 桌面版版块列表 URL（用于解析浏览量）
+  Uri desktopForumDisplay({required int fid, int page = 1}) {
+    final base = urlBuilder.baseUri.resolve('forum.php');
+    return base.replace(queryParameters: {
+      'mod': 'forumdisplay',
+      'fid': '$fid',
+      'page': '$page',
+    });
+  }
+
+  /// 桌面版帖子详情 URL（用于解析楼中楼点评）
+  Uri desktopViewThread({required int tid, int page = 1}) {
+    final base = urlBuilder.baseUri.resolve('forum.php');
+    return base.replace(queryParameters: {
+      'mod': 'viewthread',
+      'tid': '$tid',
+      'page': '$page',
+    });
+  }
+
   Uri profile({required int uid}) {
     final base = urlBuilder.baseUri.resolve('home.php');
     return base.replace(queryParameters: {'mod': 'space', 'uid': '$uid'});

@@ -29,7 +29,7 @@ class AuthLogService {
     
     try {
       // 获取应用文档目录
-      final directory = await getApplicationDocumentsDirectory();
+      final directory = await getApplicationSupportDirectory();
       _logFile = File('${directory.path}/$_logFileName');
       
       // 创建文件输出

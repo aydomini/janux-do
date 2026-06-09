@@ -4,6 +4,7 @@ import '../../constants.dart';
 import '../../forum_adapter/adapter.dart';
 import '../../forum_adapter/exceptions.dart';
 import '../../forum_adapter/models/forum_forum.dart';
+import '../../forum_adapter/models/forum_post.dart';
 import '../../forum_adapter/models/forum_results.dart';
 import '../../services/network/cookie/cookie_jar_service.dart';
 import 'api_mapper.dart';
@@ -100,6 +101,40 @@ class JavbusAdapter extends ForumAdapter {
       threadId: threadId,
       requestUrl: uri.toString(),
     );
+  }
+
+  @override
+  Future<Map<int, int>> getThreadViewCounts(int forumId, {int page = 1}) async {
+    final uri = _apiMapper.desktopForumDisplay(fid: forumId, page: page);
+    try {
+      final html = await _getHtml(
+        uri,
+        userAgent: desktopUserAgent,
+        browserNavigation: true,
+      );
+      return ForumDisplayParser.parseThreadViews(html);
+    } on DioException {
+      return {};
+    } on ForumException {
+      return {};
+    }
+  }
+
+  @override
+  Future<Map<int, List<ForumComment>>> getComments(int threadId, {int page = 1}) async {
+    final uri = _apiMapper.desktopViewThread(tid: threadId, page: page);
+    try {
+      final html = await _getHtml(
+        uri,
+        userAgent: desktopUserAgent,
+        browserNavigation: true,
+      );
+      return ViewThreadParser.parseComments(html);
+    } on DioException {
+      return {};
+    } on ForumException {
+      return {};
+    }
   }
 
   Future<String> _getHtml(
