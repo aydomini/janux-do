@@ -131,11 +131,16 @@ void main() {
 
         await adapter.getThreads(forumId: 2, filterTypeId: 8, page: 1);
 
-        final uri = fixtureAdapter.requests.single.uri;
-        expect(uri.queryParameters['module'], 'forumdisplay');
-        expect(uri.queryParameters['fid'], '2');
-        expect(uri.queryParameters['filter'], 'typeid');
-        expect(uri.queryParameters['typeid'], '8');
+        expect(fixtureAdapter.requests, hasLength(2));
+        // 移动端请求（获取主题列表）
+        final mobileUri = fixtureAdapter.requests[0].uri;
+        expect(mobileUri.queryParameters['module'], 'forumdisplay');
+        expect(mobileUri.queryParameters['fid'], '2');
+        expect(mobileUri.queryParameters['filter'], 'typeid');
+        expect(mobileUri.queryParameters['typeid'], '8');
+        // 桌面端请求（获取浏览量）
+        final desktopUri = fixtureAdapter.requests[1].uri;
+        expect(desktopUri.queryParameters['mod'], 'forumdisplay');
       },
     );
 
@@ -150,10 +155,11 @@ void main() {
 
       expect(result.threads, hasLength(2));
       expect(result.threads.first.threadId, 1001);
-      final uri = fixtureAdapter.requests.single.uri;
-      expect(uri.queryParameters['module'], 'forumdisplay');
-      expect(uri.queryParameters['fid'], '2');
-      expect(uri.queryParameters['page'], '1');
+      expect(fixtureAdapter.requests, hasLength(2));
+      final mobileUri = fixtureAdapter.requests[0].uri;
+      expect(mobileUri.queryParameters['module'], 'forumdisplay');
+      expect(mobileUri.queryParameters['fid'], '2');
+      expect(mobileUri.queryParameters['page'], '1');
     });
 
     test('getPosts requests viewthread and parses post result', () async {

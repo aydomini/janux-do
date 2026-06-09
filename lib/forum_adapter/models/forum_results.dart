@@ -14,12 +14,14 @@ class ThreadListResult {
     required this.currentPage,
     required this.totalPages,
     required this.hasNextPage,
+    this.viewCounts,
   });
 
   final List<ForumThread> threads;
   final int currentPage;
   final int totalPages;
   final bool hasNextPage;
+  final Map<int, int>? viewCounts; // tid → views，来自桌面版 HTML
 }
 
 class PostListResult {

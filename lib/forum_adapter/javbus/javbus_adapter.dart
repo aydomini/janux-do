@@ -146,29 +146,34 @@ class JavbusAdapter extends ForumAdapter {
     int? filterTypeId,
     int page = 1,
   }) async {
-    final uri = _apiMapper.forumDisplay(
+    final mobileUri = _apiMapper.forumDisplay(
       fid: forumId,
       filterTypeId: filterTypeId,
       page: page,
     );
-    final html = await _getHtml(
-      uri,
-      userAgent: mobileUserAgent,
-      referer: _lastDesktopReferer,
-    );
-    return _forumDisplayParser.parse(
+    // 并发送两个请求：移动端拿主题列表（元数据准确），桌面端拿浏览量
+    final results = await Future.wait([
+      _getHtml(mobileUri, userAgent: mobileUserAgent, referer: _lastDesktopReferer),
+      _fetchThreadViewCounts(forumId, page: page),
+    ]);
+    final html = results[0] as String;
+    final viewCounts = results[1] as Map<int, int>;
+    final result = _forumDisplayParser.parse(
       html,
       forumId: forumId,
-      requestUrl: uri.toString(),
+      requestUrl: mobileUri.toString(),
+    );
+    return ThreadListResult(
+      threads: result.threads,
+      currentPage: result.currentPage,
+      totalPages: result.totalPages,
+      hasNextPage: result.hasNextPage,
+      viewCounts: viewCounts,
     );
   }
 
-  @override
-  Future<Map<int, int>> getThreadViewCounts(int forumId, {int page = 1}) async {
-    final uri = _apiMapper.desktopForumDisplay(
-      fid: forumId,
-      page: page,
-    );
+  Future<Map<int, int>> _fetchThreadViewCounts(int forumId, {int page = 1}) async {
+    final uri = _apiMapper.desktopForumDisplay(fid: forumId, page: page);
     try {
       final html = await _getHtml(
         uri,

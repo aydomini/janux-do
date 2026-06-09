@@ -534,24 +534,18 @@ class _ThreadListPaneState extends ConsumerState<_ThreadListPane> {
       _stackTrace = null;
     });
     try {
-      final adapter = ref.read(forumAdapterProvider);
-      final results = await Future.wait([
-        adapter.getThreads(
-          forumId: widget.forum.forumId,
-          filterTypeId: widget.forum.filterTypeId,
-        ),
-        adapter.getThreadViewCounts(widget.forum.forumId),
-      ]);
+      final result = await ref.read(forumAdapterProvider).getThreads(
+        forumId: widget.forum.forumId,
+        filterTypeId: widget.forum.filterTypeId,
+      );
       if (!mounted) return;
-      final result = results[0] as ThreadListResult;
-      final views = results[1] as Map<int, int>;
       setState(() {
         _threads
           ..clear()
           ..addAll(result.threads);
         _viewCounts
           ..clear()
-          ..addAll(views);
+          ..addAll(result.viewCounts ?? const {});
         _currentPage = result.currentPage;
         _totalPages = result.totalPages;
         _hasNextPage = result.hasNextPage;
@@ -574,21 +568,15 @@ class _ThreadListPaneState extends ConsumerState<_ThreadListPane> {
     final requestedPage = _currentPage + 1;
     setState(() => _isLoadingMore = true);
     try {
-      final adapter = ref.read(forumAdapterProvider);
-      final results = await Future.wait([
-        adapter.getThreads(
-          forumId: widget.forum.forumId,
-          filterTypeId: widget.forum.filterTypeId,
-          page: requestedPage,
-        ),
-        adapter.getThreadViewCounts(widget.forum.forumId, page: requestedPage),
-      ]);
+      final result = await ref.read(forumAdapterProvider).getThreads(
+        forumId: widget.forum.forumId,
+        filterTypeId: widget.forum.filterTypeId,
+        page: requestedPage,
+      );
       if (!mounted) return;
-      final result = results[0] as ThreadListResult;
-      final views = results[1] as Map<int, int>;
       setState(() {
         _threads.addAll(result.threads);
-        _viewCounts.addAll(views);
+        _viewCounts.addAll(result.viewCounts ?? const {});
         _currentPage = result.currentPage < requestedPage
             ? requestedPage
             : result.currentPage;
