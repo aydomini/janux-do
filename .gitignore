@@ -60,3 +60,4 @@ CLAUDE.md
 # Local dev tool
 tool/verify_javbus_thread.dart
 .claude/
+.playwright-mcp/

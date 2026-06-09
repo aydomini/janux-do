@@ -228,6 +228,22 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
     }
   }
 
+  /// 在帖子列表中查找 pid 对应楼层，计算偏移并滚动定位
+  void _scrollToPost(int pid) {
+    if (!_scrollController.hasClients) return;
+    final index = _posts.indexWhere((p) => p.postId == pid);
+    if (index < 0) return;
+    // 每个 _PostCard 上下各 8px padding + 分割线高度
+    const double itemEstimate = 320;
+    final offset = index * itemEstimate;
+    final maxOffset = _scrollController.position.maxScrollExtent;
+    _scrollController.animateTo(
+      offset.clamp(0, maxOffset),
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
+  }
+
   Future<void> _loadComments(int page) async {
     try {
       final comments = await ref
@@ -328,6 +344,7 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
                 displayFloorNumber: displayFloorNumber,
                 isThreadAuthor: _isPostByThreadAuthor(post),
                 comments: postComments,
+                onQuoteTapped: _scrollToPost,
               );
             },
           );
@@ -343,12 +360,14 @@ class _PostCard extends StatelessWidget {
     required this.displayFloorNumber,
     required this.isThreadAuthor,
     this.comments = const [],
+    this.onQuoteTapped,
   });
 
   final ForumPost post;
   final int displayFloorNumber;
   final bool isThreadAuthor;
   final List<ForumComment> comments;
+  final void Function(int pid)? onQuoteTapped;
 
   @override
   Widget build(BuildContext context) {
@@ -413,6 +432,7 @@ class _PostCard extends StatelessWidget {
                                   context,
                                   element,
                                   constraints.maxWidth,
+                                  onQuoteTapped: onQuoteTapped,
                                 ),
                             onTapUrl: (url) {
                               launchInExternalBrowser(url);
@@ -549,8 +569,9 @@ String _formatCommentTime(DateTime value) {
 Widget? _buildJavBusHtmlWidget(
   BuildContext context,
   dom.Element element,
-  double contentWidth,
-) {
+  double contentWidth, {
+  void Function(int pid)? onQuoteTapped,
+}) {
   if (element.localName == 'pre') {
     final codeElement = element.querySelector('code') ?? element;
     return JavBusCodeBlock(
@@ -560,7 +581,11 @@ Widget? _buildJavBusHtmlWidget(
     );
   }
   if (element.localName == 'blockquote') {
-    return JavBusQuoteBlock(html: element.innerHtml, maxWidth: contentWidth);
+    return JavBusQuoteBlock(
+      html: element.innerHtml,
+      maxWidth: contentWidth,
+      onQuoteTapped: onQuoteTapped,
+    );
   }
   if (element.localName == 'img') {
     final src = element.attributes['src']?.trim();
@@ -818,10 +843,12 @@ class JavBusQuoteBlock extends StatelessWidget {
     super.key,
     required this.html,
     required this.maxWidth,
+    this.onQuoteTapped,
   });
 
   final String html;
   final double maxWidth;
+  final void Function(int pid)? onQuoteTapped;
 
   @override
   Widget build(BuildContext context) {
@@ -870,6 +897,7 @@ class JavBusQuoteBlock extends StatelessWidget {
                 return null;
               },
               onTapUrl: (url) {
+                if (_handleQuoteUrl(url)) return true;
                 launchInExternalBrowser(url);
                 return true;
               },
@@ -878,6 +906,20 @@ class JavBusQuoteBlock extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// 拦截引用跳转链接（goto=findpost），提取 pid 后回调而非打开浏览器
+  bool _handleQuoteUrl(String url) {
+    if (onQuoteTapped == null) return false;
+    final parsed = Uri.tryParse(url);
+    if (parsed == null) return false;
+    final pid = int.tryParse(parsed.queryParameters['pid'] ?? '');
+    if (pid == null) return false;
+    final isQuoteLink = parsed.path.contains('redirect') ||
+        parsed.queryParameters['goto'] == 'findpost';
+    if (!isQuoteLink) return false;
+    onQuoteTapped!(pid);
+    return true;
   }
 }
 
@@ -1248,9 +1290,11 @@ class _CommentSectionState extends State<_CommentSection> {
                                 ),
                             ],
                           ),
-                          Text(
-                            comment.content,
-                            style: baseStyle,
+                          SelectionArea(
+                            child: Text(
+                              comment.content,
+                              style: baseStyle,
+                            ),
                           ),
                         ],
                       ),

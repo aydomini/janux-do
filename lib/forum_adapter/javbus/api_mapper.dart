@@ -30,13 +30,17 @@ class JavBusApiMapper {
     return _mobileApi({'module': 'viewthread', 'tid': '$tid', 'page': '$page'});
   }
 
-  /// 桌面版版块列表 URL（用于解析浏览量）
-  Uri desktopForumDisplay({required int fid, int page = 1}) {
+  /// 桌面版版块列表 URL（包含完整浏览量和过滤参数）
+  Uri desktopForumDisplay({required int fid, int? filterTypeId, int page = 1}) {
     final base = urlBuilder.baseUri.resolve('forum.php');
     return base.replace(queryParameters: {
       'mod': 'forumdisplay',
       'fid': '$fid',
       'page': '$page',
+      if (filterTypeId != null) ...{
+        'filter': 'typeid',
+        'typeid': '$filterTypeId',
+      },
     });
   }
 
@@ -46,6 +50,19 @@ class JavBusApiMapper {
     return base.replace(queryParameters: {
       'mod': 'viewthread',
       'tid': '$tid',
+      'page': '$page',
+    });
+  }
+
+  /// 点评分页 AJAX 接口（第 2 页及以后）
+  /// URL: forum.php?mod=misc&action=commentmore&tid={tid}&pid={pid}&page={page}
+  Uri commentMore({required int tid, required int pid, int page = 1}) {
+    final base = urlBuilder.baseUri.resolve('forum.php');
+    return base.replace(queryParameters: {
+      'mod': 'misc',
+      'action': 'commentmore',
+      'tid': '$tid',
+      'pid': '$pid',
       'page': '$page',
     });
   }

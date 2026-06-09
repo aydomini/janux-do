@@ -79,12 +79,18 @@ class JavbusAdapter extends ForumAdapter {
     int? filterTypeId,
     int page = 1,
   }) async {
-    final uri = _apiMapper.forumDisplay(
+    // 使用桌面版 URL，一次请求即可获取主题列表和完整浏览量
+    // 桌面版 HTML 包含"回复 X / 查看 Y"格式，parse() 直接提取 views
+    final uri = _apiMapper.desktopForumDisplay(
       fid: forumId,
       filterTypeId: filterTypeId,
       page: page,
     );
-    final html = await _getHtml(uri, userAgent: mobileUserAgent);
+    final html = await _getHtml(
+      uri,
+      userAgent: desktopUserAgent,
+      browserNavigation: true,
+    );
     return _forumDisplayParser.parse(
       html,
       forumId: forumId,
@@ -93,19 +99,13 @@ class JavbusAdapter extends ForumAdapter {
   }
 
   @override
-  Future<PostListResult> getPosts({required int threadId, int page = 1}) async {
-    final uri = _apiMapper.viewThread(tid: threadId, page: page);
-    final html = await _getHtml(uri, userAgent: mobileUserAgent);
-    return _viewThreadParser.parse(
-      html,
-      threadId: threadId,
-      requestUrl: uri.toString(),
-    );
-  }
-
-  @override
   Future<Map<int, int>> getThreadViewCounts(int forumId, {int page = 1}) async {
-    final uri = _apiMapper.desktopForumDisplay(fid: forumId, page: page);
+    // getThreads 已使用桌面版 URL 直接获取浏览量
+    // 此方法作为精度增强，从 normalthread_XXX 行元素中提取精确浏览量
+    final uri = _apiMapper.desktopForumDisplay(
+      fid: forumId,
+      page: page,
+    );
     try {
       final html = await _getHtml(
         uri,
@@ -121,6 +121,17 @@ class JavbusAdapter extends ForumAdapter {
   }
 
   @override
+  Future<PostListResult> getPosts({required int threadId, int page = 1}) async {
+    final uri = _apiMapper.viewThread(tid: threadId, page: page);
+    final html = await _getHtml(uri, userAgent: mobileUserAgent);
+    return _viewThreadParser.parse(
+      html,
+      threadId: threadId,
+      requestUrl: uri.toString(),
+    );
+  }
+
+  @override
   Future<Map<int, List<ForumComment>>> getComments(int threadId, {int page = 1}) async {
     final uri = _apiMapper.desktopViewThread(tid: threadId, page: page);
     try {
@@ -129,7 +140,40 @@ class JavbusAdapter extends ForumAdapter {
         userAgent: desktopUserAgent,
         browserNavigation: true,
       );
-      return ViewThreadParser.parseComments(html);
+      // 解析第 1 页点评
+      final allComments = ViewThreadParser.parseComments(html);
+      // 检查哪些帖子有更多点评页
+      final pagination = ViewThreadParser.parseCommentPagination(html);
+      // 逐帖逐页抓取点评
+      for (final entry in pagination.entries) {
+        final pid = entry.key;
+        for (var cp = 2; cp <= entry.value; cp++) {
+          try {
+            final moreUri = _apiMapper.commentMore(
+              tid: threadId,
+              pid: pid,
+              page: cp,
+            );
+            final moreHtml = await _getHtml(
+              moreUri,
+              userAgent: desktopUserAgent,
+              browserNavigation: true,
+            );
+            final moreComments = ViewThreadParser.parseComments(
+              moreHtml,
+              knownPid: pid,
+            );
+            for (final mc in moreComments.entries) {
+              allComments.putIfAbsent(mc.key, () => []).addAll(mc.value);
+            }
+          } on DioException {
+            // 单页失败不影响其他页
+          } on ForumException {
+            // 单页失败不影响其他页
+          }
+        }
+      }
+      return allComments;
     } on DioException {
       return {};
     } on ForumException {

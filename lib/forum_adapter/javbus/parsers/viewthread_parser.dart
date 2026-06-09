@@ -393,16 +393,23 @@ class ViewThreadParser {
   }
 
   /// 从桌面版 HTML 中解析楼中楼点评（pstl 块），按帖子 pid 分组
-  static Map<int, List<ForumComment>> parseComments(String html) {
+  /// [knownPid] 用于 commentmore AJAX 响应：该响应不含 comment_XXX 外层容器，
+  /// 无法通过父级推断 pid，此时用此参数作为回退。
+  static Map<int, List<ForumComment>> parseComments(
+    String html, {
+    int? knownPid,
+  }) {
     final document = html_parser.parse(html);
     final results = <int, List<ForumComment>>{};
     final pstlBlocks = document.querySelectorAll('.pstl');
     for (final block in pstlBlocks) {
-      final pid = _findPstlParentPid(block);
+      final pid = _findPstlParentPid(block) ?? knownPid;
       if (pid == null) continue;
       final psta = block.querySelector('.psta');
       final psti = block.querySelector('.psti');
-      final authorLink = psta?.querySelector('a[href*="uid="]');
+
+      // 作者提取：多级备选
+      final authorLink = _findCommentAuthorLink(psta, block);
       final authorName = authorLink?.text.trim() ?? '';
       final authorId = _extractQueryInt(
         authorLink?.attributes['href'] ?? '',
@@ -410,19 +417,29 @@ class ViewThreadParser {
       );
       final avatarImg = psta?.querySelector('img[src]');
       final avatarUrl = avatarImg?.attributes['src']?.trim();
-      final timeSpan = psti?.querySelector('.xg1');
+
+      // 时间提取：多级备选，优先从元素 title 属性取完整时间戳
+      final timeSpan = _findCommentTimeElement(psti, block);
+      var createdAt = _extractCommentTime(timeSpan);
       timeSpan?.remove();
-      final content = psti?.text.trim() ?? '';
-      DateTime? createdAt;
-      if (timeSpan != null) {
-        final timeText = timeSpan.text.trim();
-        final timeMatch = RegExp(
-          r'(\d{4}-\d{1,2}-\d{1,2}\s+\d{2}:\d{2})',
-        ).firstMatch(timeText);
-        if (timeMatch != null) {
-          createdAt = DateTime.tryParse(timeMatch.group(1)!);
+
+      // 移除作者区域避免污染内容文本
+      psta?.remove();
+      authorLink?.remove();
+
+      var content = (psti?.text ?? block.text).trim()
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+
+      // 时间未通过元素提取到时，从文本正则提取并剥离
+      if (createdAt == null) {
+        final textMatch = _extractTimeFromText(content);
+        if (textMatch != null) {
+          createdAt = textMatch.dateTime;
+          content = content.replaceFirst(textMatch.matchedText, '').trim();
         }
       }
+
       if (authorName.isEmpty && content.isEmpty) continue;
       results.putIfAbsent(pid, () => []).add(
         ForumComment(
@@ -437,9 +454,241 @@ class ViewThreadParser {
     return results;
   }
 
+  /// 从 viewthread 桌面版 HTML 中提取点评分页信息
+  /// 返回 Map<pid, 总页数>，仅包含有超过 1 页的帖子
+  /// 解析来自 .pgs .pg 分页条中的 commentmore URL
+  static Map<int, int> parseCommentPagination(String html) {
+    final document = html_parser.parse(html);
+    final results = <int, int>{};
+    // 查找每个 comment_XXXXXX 容器下的分页条
+    for (final cmBlock in document.querySelectorAll('[id^="comment_"]')) {
+      final pidMatch = RegExp(r'^comment_(\d+)$').firstMatch(
+        cmBlock.attributes['id'] ?? '',
+      );
+      if (pidMatch == null) continue;
+      final pid = int.parse(pidMatch.group(1)!);
+      // 解析分页条中所有页码链接，取最大值
+      var maxPage = 1;
+      final pgBar = cmBlock.querySelector('.pgs .pg');
+      if (pgBar == null) continue;
+      for (final link in pgBar.querySelectorAll('a')) {
+        final onclick = link.attributes['onclick'] ?? '';
+        final pageMatch = RegExp(r'[&?]page=(\d+)').firstMatch(onclick);
+        if (pageMatch != null) {
+          final page = int.parse(pageMatch.group(1)!);
+          if (page > maxPage) maxPage = page;
+        }
+      }
+      if (maxPage > 1) results[pid] = maxPage;
+    }
+    return results;
+  }
+
+  /// 多级备选查找点评作者链接
+  /// 优先匹配 Discuz 用户名链接（xi2/xw1 class），避免选到头像外链
+  static Element? _findCommentAuthorLink(
+    Element? psta,
+    Element block,
+  ) {
+    // 优先找 Discuz 用户名链接（class="xi2 xw1"）
+    final named = psta?.querySelector('a.xi2') ??
+        psta?.querySelector('a.xw1') ??
+        block.querySelector('.psta a.xi2') ??
+        block.querySelector('.psta a.xw1');
+    if (named != null) return named;
+
+    // 回退到 uid 链接，跳过无文本的（通常是头像链接）
+    final uidLinks = psta?.querySelectorAll('a[href*="uid="]') ?? [];
+    for (final link in uidLinks) {
+      if (link.text.trim().isNotEmpty) return link;
+    }
+    return psta?.querySelector('a[href*="home.php?mod=space"]') ??
+        psta?.querySelector('a[href]') ??
+        block.querySelector('a[href*="uid="]') ??
+        block.querySelector('a[href*="space"]');
+  }
+
+  /// 多级备选查找点评时间元素
+  static Element? _findCommentTimeElement(
+    Element? psti,
+    Element block,
+  ) {
+    return psti?.querySelector('.xg1') ??
+        psti?.querySelector('em') ??
+        psti?.querySelector('span') ??
+        block.querySelector('.xg1') ??
+        block.querySelector('em') ??
+        block.querySelector('span');
+  }
+
+  /// 从时间元素中提取 DateTime
+  /// 优先级：title 属性（绝对时间戳，含递归子元素查找） > 元素文本（绝对时间） > 相对时间
+  static DateTime? _extractCommentTime(Element? timeSpan) {
+    if (timeSpan == null) return null;
+
+    // 递归查找 title 属性（Discuz 可能在子 <span> 中存放时间戳）
+    // 例如 <span class="xg1">發表於 <span title="2026-6-9 13:17">4 小時前</span></span>
+    final title = _findTitleInTree(timeSpan);
+    if (title != null) {
+      final fromTitle = _parseAbsoluteTime(title);
+      if (fromTitle != null) return fromTitle;
+    }
+
+    // 规范化文本：将 &nbsp; /   替换为普通空格，Dart \s 不匹配
+    final raw = timeSpan.text
+        .replaceAll(' ', ' ')
+        .replaceAll('&nbsp;', ' ')
+        .trim();
+
+    // 尝试绝对时间
+    final absolute = _parseAbsoluteTime(raw);
+    if (absolute != null) return absolute;
+
+    // 尝试相对时间：X 天前 / X 小时前 / X 分钟前 / 刚刚 / 前天
+    return _parseRelativeTime(raw);
+  }
+
+  /// 递归搜索元素树中的 title 属性
+  static String? _findTitleInTree(Element element) {
+    final t = element.attributes['title']?.trim();
+    if (t != null && t.isNotEmpty) return t;
+    for (final child in element.children) {
+      final found = _findTitleInTree(child);
+      if (found != null) return found;
+    }
+    return null;
+  }
+
+  /// 解析绝对时间字符串，支持格式：
+  /// - 2025-6-9 14:30（不补零）
+  /// - 2025-06-09 14:30（补零）
+  /// - 2025年6月9日 16:45（中文）
+  static DateTime? _parseAbsoluteTime(String raw) {
+    final m = RegExp(
+      r'(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})\s+(\d{1,2}):(\d{2})',
+    ).firstMatch(raw);
+    if (m != null) {
+      return DateTime(
+        int.parse(m.group(1)!),
+        int.parse(m.group(2)!),
+        int.parse(m.group(3)!),
+        int.parse(m.group(4)!),
+        int.parse(m.group(5)!),
+      );
+    }
+    final cm = RegExp(
+      r'(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日\s*(\d{1,2}):(\d{2})',
+    ).firstMatch(raw);
+    if (cm != null) {
+      return DateTime(
+        int.parse(cm.group(1)!),
+        int.parse(cm.group(2)!),
+        int.parse(cm.group(3)!),
+        int.parse(cm.group(4)!),
+        int.parse(cm.group(5)!),
+      );
+    }
+    return null;
+  }
+
+  /// 解析相对时间字符串，支持格式：
+  /// - X 天前
+  /// - X 小时前 / X 小時前
+  /// - X 分钟前 / X 分鐘前
+  /// - 刚刚 / 剛剛 / 秒前
+  /// - 前天 HH:MM
+  static DateTime? _parseRelativeTime(String raw) {
+    final daysMatch = RegExp(r'(\d+)\s*天前').firstMatch(raw);
+    if (daysMatch != null) {
+      return DateTime.now().subtract(
+        Duration(days: int.parse(daysMatch.group(1)!)),
+      );
+    }
+    final hoursMatch = RegExp(r'(\d+)\s*(?:小时|小時)前').firstMatch(raw);
+    if (hoursMatch != null) {
+      return DateTime.now().subtract(
+        Duration(hours: int.parse(hoursMatch.group(1)!)),
+      );
+    }
+    final minsMatch = RegExp(r'(\d+)\s*(?:分钟|分鐘)前').firstMatch(raw);
+    if (minsMatch != null) {
+      return DateTime.now().subtract(
+        Duration(minutes: int.parse(minsMatch.group(1)!)),
+      );
+    }
+    // 前天 HH:MM
+    final dayBeforeMatch = RegExp(r'前天\s*(\d{1,2}):(\d{2})').firstMatch(raw);
+    if (dayBeforeMatch != null) {
+      final d = DateTime.now().subtract(const Duration(days: 2));
+      return DateTime(
+        d.year, d.month, d.day,
+        int.parse(dayBeforeMatch.group(1)!),
+        int.parse(dayBeforeMatch.group(2)!),
+      );
+    }
+    if (raw.contains('刚刚') || raw.contains('剛剛') || raw.contains('秒前')) {
+      return DateTime.now();
+    }
+    return null;
+  }
+
+  /// 从纯文本中提取时间并返回匹配的 DateTime 和原始文本
+  /// 用于时间不在独立元素中，而与内容混在一起的场景
+  static ({DateTime dateTime, String matchedText})? _extractTimeFromText(
+    String text,
+  ) {
+    final fullMatch = RegExp(
+      r'(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})\s+(\d{1,2}):(\d{2})',
+    ).firstMatch(text);
+    if (fullMatch != null) {
+      return (
+        dateTime: DateTime(
+          int.parse(fullMatch.group(1)!),
+          int.parse(fullMatch.group(2)!),
+          int.parse(fullMatch.group(3)!),
+          int.parse(fullMatch.group(4)!),
+          int.parse(fullMatch.group(5)!),
+        ),
+        matchedText: fullMatch.group(0)!,
+      );
+    }
+    final shortMatch = RegExp(
+      r'(\d{1,2})[-\/](\d{1,2})\s+(\d{1,2}):(\d{2})',
+    ).firstMatch(text);
+    if (shortMatch != null) {
+      return (
+        dateTime: DateTime(
+          DateTime.now().year,
+          int.parse(shortMatch.group(1)!),
+          int.parse(shortMatch.group(2)!),
+          int.parse(shortMatch.group(3)!),
+          int.parse(shortMatch.group(4)!),
+        ),
+        matchedText: shortMatch.group(0)!,
+      );
+    }
+    final chineseMatch = RegExp(
+      r'(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日\s*(\d{1,2}):(\d{2})',
+    ).firstMatch(text);
+    if (chineseMatch != null) {
+      return (
+        dateTime: DateTime(
+          int.parse(chineseMatch.group(1)!),
+          int.parse(chineseMatch.group(2)!),
+          int.parse(chineseMatch.group(3)!),
+          int.parse(chineseMatch.group(4)!),
+          int.parse(chineseMatch.group(5)!),
+        ),
+        matchedText: chineseMatch.group(0)!,
+      );
+    }
+    return null;
+  }
+
   static int? _findPstlParentPid(Element element) {
     Element? current = element.parent;
     while (current != null) {
+      // pidXXXX 格式（标准 Discuz 楼层 ID）
       final idAttr =
           current.attributes['id'] ??
           current.querySelector('[id^="pid"]')?.attributes['id'];
@@ -447,6 +696,11 @@ class ViewThreadParser {
         final pidMatch = RegExp(r'^pid(\d+)$').firstMatch(idAttr);
         if (pidMatch != null) return int.tryParse(pidMatch.group(1)!);
       }
+      // comment_XXXXXX 格式（Discuz X 点评容器 ID）
+      final commentIdAttr = current.attributes['id'] ?? '';
+      final commentMatch = RegExp(r'^comment_(\d+)$').firstMatch(commentIdAttr);
+      if (commentMatch != null) return int.tryParse(commentMatch.group(1)!);
+      // a[id^="pid"] 格式
       final pidLink = current.querySelector('a[id^="pid"]');
       if (pidLink != null) {
         final href = pidLink.attributes['id'] ?? '';
