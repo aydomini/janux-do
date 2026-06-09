@@ -1,9 +1,11 @@
 import 'package:dio/dio.dart';
 
+import '../../constants.dart';
 import '../../forum_adapter/adapter.dart';
 import '../../forum_adapter/exceptions.dart';
 import '../../forum_adapter/models/forum_forum.dart';
 import '../../forum_adapter/models/forum_results.dart';
+import '../../services/network/cookie/cookie_jar_service.dart';
 import 'api_mapper.dart';
 import 'parsers/forumdisplay_parser.dart';
 import 'parsers/forumindex_parser.dart';
@@ -247,6 +249,23 @@ class JavbusAdapter extends ForumAdapter {
         _cookies[name] = value;
       }
     }
+    _syncToCookieJar();
+  }
+
+  /// 将适配器内部 cookie 同步到全局 CookieJarService，
+  /// 供图片请求等服务使用。
+  void _syncToCookieJar() {
+    try {
+      final jar = CookieJarService();
+      for (final entry in _cookies.entries) {
+        jar.setCookie(
+          entry.key,
+          entry.value,
+          url: AppConstants.baseUrl,
+          path: '/',
+        );
+      }
+    } catch (_) {}
   }
 
   String _cookieHeader() {
