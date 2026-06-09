@@ -76,6 +76,9 @@ class JavBusThreadContent extends ConsumerStatefulWidget {
       _JavBusThreadContentState();
 }
 
+/// 编译时测试环境检测：FLUTTER_TEST 由 Flutter 测试框架自动注入
+const bool _isTest = bool.fromEnvironment('FLUTTER_TEST');
+
 class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
   final ScrollController _scrollController = ScrollController();
   final List<ForumPost> _posts = [];
@@ -170,13 +173,13 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
           .getPosts(threadId: widget.threadId);
       if (!mounted) return;
       // 确保 Cookie 在图片加载前就绪，避免附件图片等需要鉴权的请求失败
-      // 超时保护：测试环境 CookieJarService 可能因缺少 platform channel mock 而阻塞
-      try {
-        await ImageHeaderService.instance.refresh().timeout(
-          const Duration(milliseconds: 800),
-        );
-      } catch (_) {
-        // refresh 失败或超时不影响帖子内容显示，图片可能缺少 Cookie
+      // 测试环境跳过：CookieJarService 依赖 platform channel，测试中无 mock 会阻塞
+      if (!_isTest) {
+        try {
+          await ImageHeaderService.instance.refresh();
+        } catch (_) {
+          // refresh 失败不影响帖子内容显示，图片可能缺少 Cookie
+        }
       }
       setState(() {
         _posts
