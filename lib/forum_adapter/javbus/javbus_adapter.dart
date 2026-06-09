@@ -289,7 +289,6 @@ class JavbusAdapter extends ForumAdapter {
             'Accept':
                 'text/html,application/xhtml+xml,application/xml;q=0.9,'
                 'image/avif,image/webp,*/*;q=0.8',
-            'Accept-Encoding': 'gzip, deflate, br',
             'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.5',
             'Connection': 'keep-alive',
             'DNT': '1',
