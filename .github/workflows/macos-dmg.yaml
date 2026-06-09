@@ -21,7 +21,7 @@ concurrency:
 
 env:
   FLUTTER_VERSION: '3.38.9'
-  APP_NAME: 'Runner'
+  APP_NAME: 'JANUX DO'
   DMG_NAME: 'JANUX-DO-macOS.dmg'
   DMG_VOLNAME: 'JANUX DO'
 
