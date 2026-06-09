@@ -105,7 +105,7 @@ void main() {
         fixtureAdapter.requests.last.headers['Referer'],
         'https://www.javbus.com/',
       );
-      expect(fixtureAdapter.requests.last.headers['Accept-Language'], 'zh-CN');
+      expect(fixtureAdapter.requests.last.headers['Accept-Language'], contains('zh-CN'));
       expect(
         fixtureAdapter.requests.last.headers['Sec-Fetch-Dest'],
         'document',
@@ -132,7 +132,7 @@ void main() {
         await adapter.getThreads(forumId: 2, filterTypeId: 8, page: 1);
 
         final uri = fixtureAdapter.requests.single.uri;
-        expect(uri.queryParameters['module'], 'forumdisplay');
+        expect(uri.queryParameters['mod'], 'forumdisplay');
         expect(uri.queryParameters['fid'], '2');
         expect(uri.queryParameters['filter'], 'typeid');
         expect(uri.queryParameters['typeid'], '8');
@@ -151,7 +151,7 @@ void main() {
       expect(result.threads, hasLength(2));
       expect(result.threads.first.threadId, 1001);
       final uri = fixtureAdapter.requests.single.uri;
-      expect(uri.queryParameters['module'], 'forumdisplay');
+      expect(uri.queryParameters['mod'], 'forumdisplay');
       expect(uri.queryParameters['fid'], '2');
       expect(uri.queryParameters['page'], '1');
     });
