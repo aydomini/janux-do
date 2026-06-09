@@ -880,12 +880,8 @@ class JavBusPostImage extends StatelessWidget {
                 httpHeaders: ImageHeaderService.instance.headers,
                 cacheManager: JavBusPostImageCacheManager(),
                 fit: BoxFit.contain,
-                placeholder: (context, url) => const Center(
-                  child: SizedBox(
-                    width: 28,
-                    height: 28,
-                    child: CircularProgressIndicator(strokeWidth: 2.5),
-                  ),
+                placeholder: (context, url) => Container(
+                  color: theme.colorScheme.surfaceContainerHighest,
                 ),
                 errorWidget: (context, url, error) => Center(
                   child: Column(
@@ -941,13 +937,8 @@ class JavBusImagePreviewDialog extends StatelessWidget {
                     httpHeaders: httpHeaders,
                     cacheManager: JavBusPostImageCacheManager(),
                     fit: BoxFit.contain,
-                    placeholder: (context, url) => const Center(
-                      child: SizedBox(
-                        width: 36,
-                        height: 36,
-                        child: CircularProgressIndicator(strokeWidth: 2.8),
-                      ),
-                    ),
+                    placeholder: (context, url) =>
+                        const SizedBox.shrink(),
                     errorWidget: (context, url, error) => Center(
                       child: Text(
                         '原图加载失败',
@@ -1113,16 +1104,6 @@ class _PostAvatar extends StatelessWidget {
           fit: BoxFit.cover,
           placeholder: (context, url) => Container(
             color: theme.colorScheme.primaryContainer,
-            child: Center(
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: theme.colorScheme.onPrimaryContainer,
-                ),
-              ),
-            ),
           ),
           errorWidget: (context, url, error) => CircleAvatar(
             radius: size / 2,

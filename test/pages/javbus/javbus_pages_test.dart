@@ -97,7 +97,7 @@ class _FakeForumAdapter extends ForumAdapter {
           author: '楼主',
           replies: 3,
           views: 88,
-          createdAt: DateTime(2026, 6, 8, 9, page),
+          createdAt: DateTime(2026, 6, 7, 9, page),
           isPinned: index == 0,
           hasAttachment: true,
           lastReplyAt: DateTime(2026, 6, 8, 12),
