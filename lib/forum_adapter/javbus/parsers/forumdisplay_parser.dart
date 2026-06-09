@@ -112,6 +112,22 @@ class ForumDisplayParser {
         element.text.contains('置頂') ||
         element.querySelector('img[src*="pin_"]') != null;
   }
+
+  /// 从桌面版 HTML 解析浏览量（tid → views）
+  static Map<int, int> parseThreadViews(String html) {
+    final document = html_parser.parse(html);
+    final results = <int, int>{};
+    for (final row in document.querySelectorAll('[id^="normalthread_"]')) {
+      final rawId = row.id;
+      final tid = int.tryParse(rawId.replaceFirst('normalthread_', ''));
+      if (tid == null) continue;
+      final viewsElement = row.querySelector('.views');
+      final viewsText = viewsElement?.text.trim() ?? '';
+      final views = int.tryParse(viewsText);
+      if (views != null) results[tid] = views;
+    }
+    return results;
+  }
 }
 
 typedef _Stats = ({int replies, int views});

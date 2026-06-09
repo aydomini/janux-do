@@ -463,6 +463,7 @@ class _PostCard extends StatelessWidget {
             ],
           ),
         ),
+    );
   }
 }
 
