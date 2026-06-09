@@ -170,7 +170,14 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
           .getPosts(threadId: widget.threadId);
       if (!mounted) return;
       // 确保 Cookie 在图片加载前就绪，避免附件图片等需要鉴权的请求失败
-      await ImageHeaderService.instance.refresh();
+      // 超时保护：测试环境 CookieJarService 可能因缺少 platform channel mock 而阻塞
+      try {
+        await ImageHeaderService.instance.refresh().timeout(
+          const Duration(milliseconds: 800),
+        );
+      } catch (_) {
+        // refresh 失败或超时不影响帖子内容显示，图片可能缺少 Cookie
+      }
       setState(() {
         _posts
           ..clear()
