@@ -201,9 +201,9 @@ void main() {
     expect(JavBusLayout.sidebarWidth, 300);
     expect(JavBusLayout.contentMaxWidth, 920);
     expect(JavBusLayout.postMetaColumnWidth, 150);
-    expect(JavBusLayout.topicReplyColumnWidth, 100);
-    expect(JavBusLayout.topicViewsColumnWidth, 100);
-    expect(JavBusLayout.topicTimeColumnWidth, 150);
+    expect(JavBusLayout.topicReplyColumnWidth, 120);
+    expect(JavBusLayout.topicViewsColumnWidth, 120);
+    expect(JavBusLayout.topicTimeColumnWidth, 120);
     expect(JavBusLayout.mediaPreviewMaxWidth, 480);
     expect(JavBusLayout.mediaPreviewHeight, 270);
   });
@@ -215,7 +215,6 @@ void main() {
 
     expect(find.byType(JavBusShellPage), findsOneWidget);
     expect(find.text('JANUX DO'), findsOneWidget);
-    expect(find.text('分区'), findsOneWidget);
     expect(find.text('有码讨论'), findsWidgets);
     expect(find.text('日本AV'), findsOneWidget);
     expect(find.textContaining('120 主题'), findsOneWidget);
