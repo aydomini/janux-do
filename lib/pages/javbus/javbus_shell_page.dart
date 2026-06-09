@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:jovial_svg/jovial_svg.dart';
 
 import '../../forum_adapter/models/forum_forum.dart';
-import '../../forum_adapter/models/forum_results.dart';
 import '../../forum_adapter/models/forum_thread.dart';
 import '../../providers/forum_provider.dart';
 

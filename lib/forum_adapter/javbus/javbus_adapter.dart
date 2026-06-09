@@ -298,7 +298,7 @@ class JavbusAdapter extends ForumAdapter {
               'Sec-Fetch-Mode': 'navigate',
               // 同站跳转用 same-origin，直接打开用 none
               if (referer != null &&
-                  _isSameOrigin(referer!, uri.toString()))
+                  _isSameOrigin(referer, uri.toString()))
                 'Sec-Fetch-Site': 'same-origin'
               else
                 'Sec-Fetch-Site': 'none',
