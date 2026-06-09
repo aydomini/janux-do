@@ -169,12 +169,13 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
           .read(forumAdapterProvider)
           .getPosts(threadId: widget.threadId);
       if (!mounted) return;
+      // 确保 Cookie 在图片加载前就绪，避免附件图片等需要鉴权的请求失败
+      await ImageHeaderService.instance.refresh();
       setState(() {
         _posts
           ..clear()
           ..addAll(result.posts);
         _trackThreadAuthor();
-        ImageHeaderService.instance.refresh();
         _currentPage = result.currentPage;
         _hasNextPage = result.hasNextPage;
         _isLoadingInitial = false;
@@ -231,16 +232,53 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
   /// 帖子 ID → GlobalKey 映射，用于引用跳转精确定位
   final Map<int, GlobalKey> _postKeys = {};
 
-  /// 在帖子列表中查找 pid 对应楼层，使用 GlobalKey 精确滚动
+  /// 在帖子列表中查找 pid 对应楼层并滚动到位
+  ///
+  /// 两阶段定位策略：
+  /// 1. 快速路径：目标在视口内 → GlobalKey 精确跳转
+  /// 2. 慢速路径：目标已被 ListView 回收（离屏）→ 按索引比例估算偏移
+  ///    animateTo 将目标拉入视口 → Widget 重建后 ensureVisible 精确修正
   void _scrollToPost(int pid) {
     final key = _postKeys[pid];
-    if (key?.currentContext == null) return;
-    Scrollable.ensureVisible(
-      key!.currentContext!,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-      alignment: 0.1, // 略微偏顶部
-    );
+
+    // 快速路径：目标在当前 Widget 树中，直接精确跳转
+    if (key?.currentContext != null) {
+      Scrollable.ensureVisible(
+        key!.currentContext!,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+        alignment: 0.1,
+      );
+      return;
+    }
+
+    // 慢速路径：目标已离屏，先用数据驱动估算位置滚过去，再精确修正
+    final targetIndex = _posts.indexWhere((p) => p.postId == pid);
+    if (targetIndex == -1) return;
+    if (_posts.isEmpty || !_scrollController.hasClients) return;
+
+    final position = _scrollController.position;
+    final estimatedOffset =
+        targetIndex / _posts.length * position.maxScrollExtent;
+
+    _scrollController
+        .animateTo(
+          estimatedOffset.clamp(0.0, position.maxScrollExtent),
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        )
+        .then((_) {
+          if (!mounted) return;
+          final key = _postKeys[pid];
+          if (key?.currentContext != null) {
+            Scrollable.ensureVisible(
+              key.currentContext!,
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeInOut,
+              alignment: 0.1,
+            );
+          }
+        });
   }
 
   final Set<int> _loadedCommentPages = {};
