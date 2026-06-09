@@ -455,7 +455,7 @@ class ViewThreadParser {
   }
 
   /// 从 viewthread 桌面版 HTML 中提取点评分页信息
-  /// 返回 Map<pid, 总页数>，仅包含有超过 1 页的帖子
+  /// 返回 `Map<pid, 总页数>`，仅包含有超过 1 页的帖子
   /// 解析来自 .pgs .pg 分页条中的 commentmore URL
   static Map<int, int> parseCommentPagination(String html) {
     final document = html_parser.parse(html);
