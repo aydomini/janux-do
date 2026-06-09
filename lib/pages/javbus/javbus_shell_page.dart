@@ -1180,6 +1180,6 @@ String _formatThreadTime(DateTime? value) {
   String two(int input) => input.toString().padLeft(2, '0');
   return value.year == now.year
       ? '${two(value.month)} 月 ${two(value.day)} 日'
-      : '${value.year} 年 ${two(value.month)} 月 ${two(value.day)} 日';
+      : '${two(value.year % 100)} 年 ${two(value.month)} 月 ${two(value.day)} 日';
 }
 

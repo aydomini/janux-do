@@ -76,6 +76,7 @@ class JavBusApiMapper {
       'tid': '$tid',
       'pid': '$pid',
       'page': '$page',
+      'inajax': '1',
       // ignore: use_null_aware_elements
       if (formhash != null) 'formhash': formhash,
     });

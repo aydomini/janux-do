@@ -456,27 +456,14 @@ class ViewThreadParser {
 
   /// 从 viewthread 桌面版 HTML 中提取点评分页信息
   /// 返回 `Map<pid, 总页数>`，仅包含有超过 1 页的帖子
-  /// .pgs 分页条是 comment_XXX 的兄弟节点，不在其内部
+  /// 反向查找：从 .pgs 出发，向上/向前找到最近的 comment_XXX
   static Map<int, int> parseCommentPagination(String html) {
     final document = html_parser.parse(html);
     final results = <int, int>{};
-    for (final cmBlock in document.querySelectorAll('[id^="comment_"]')) {
-      final pidMatch = RegExp(r'^comment_(\d+)$').firstMatch(
-        cmBlock.attributes['id'] ?? '',
-      );
-      if (pidMatch == null) continue;
-      final pid = int.parse(pidMatch.group(1)!);
-      // .pgs 可能在 comment_XXX 内部（浏览器解析后），也可能在其外部兄弟节点
-      Element? pgBar = cmBlock.querySelector('.pgs');
-      if (pgBar == null) {
-        pgBar = cmBlock.nextElementSibling;
-        while (pgBar != null && !pgBar.classes.contains('pgs')) {
-          pgBar = pgBar.nextElementSibling;
-        }
-      }
-      if (pgBar == null) continue;
+    for (final pgBar in document.querySelectorAll('.pgs')) {
       final pg = pgBar.querySelector('.pg');
       if (pg == null) continue;
+      // 提取最大页码
       var maxPage = 1;
       for (final link in pg.querySelectorAll('a')) {
         final onclick = link.attributes['onclick'] ?? '';
@@ -486,9 +473,60 @@ class ViewThreadParser {
           if (page > maxPage) maxPage = page;
         }
       }
-      if (maxPage > 1) results[pid] = maxPage;
+      if (maxPage <= 1) continue;
+      // 反向查找最近的 comment_XXX：先查子节点，再向前兄弟，最后向上
+      final pid = _findNearestCommentPid(pgBar);
+      if (pid != null) results[pid] = maxPage;
     }
     return results;
+  }
+
+  /// 从 .pgs 元素出发，反向查找最近的 comment_XXXXXX 的 pid
+  static int? _findNearestCommentPid(Element pgBar) {
+    // 1) 检查自身及祖先（.pgs 可能在 comment_XXX 内部）
+    Element? cursor = pgBar;
+    while (cursor != null && cursor.localName != 'body') {
+      final m = RegExp(r'^comment_(\d+)$').firstMatch(
+        cursor.attributes['id'] ?? '',
+      );
+      if (m != null) return int.tryParse(m.group(1)!);
+      cursor = cursor.parent;
+    }
+    // 2) 向前遍历兄弟节点
+    Element? prev = pgBar.previousElementSibling;
+    while (prev != null) {
+      final id = prev.attributes['id'] ?? '';
+      final m = RegExp(r'^comment_(\d+)$').firstMatch(id);
+      if (m != null) return int.tryParse(m.group(1)!);
+      final sub = prev.querySelector('[id^="comment_"]');
+      if (sub != null) {
+        final sm = RegExp(r'^comment_(\d+)$').firstMatch(
+          sub.attributes['id'] ?? '',
+        );
+        if (sm != null) return int.tryParse(sm.group(1)!);
+      }
+      prev = prev.previousElementSibling;
+    }
+    // 3) 向上查父节点的前兄弟
+    Element? parent = pgBar.parent;
+    while (parent != null && parent.localName != 'body') {
+      final prevSib = parent.previousElementSibling;
+      if (prevSib != null) {
+        final m = RegExp(r'^comment_(\d+)$').firstMatch(
+          prevSib.attributes['id'] ?? '',
+        );
+        if (m != null) return int.tryParse(m.group(1)!);
+        final sub = prevSib.querySelector('[id^="comment_"]');
+        if (sub != null) {
+          final sm = RegExp(r'^comment_(\d+)$').firstMatch(
+            sub.attributes['id'] ?? '',
+          );
+          if (sm != null) return int.tryParse(sm.group(1)!);
+        }
+      }
+      parent = parent.parent;
+    }
+    return null;
   }
 
   /// 多级备选查找点评作者链接

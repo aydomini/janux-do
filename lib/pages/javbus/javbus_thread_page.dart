@@ -1,5 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
 import 'package:html/dom.dart' as dom;
@@ -227,19 +228,18 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
     }
   }
 
-  /// 在帖子列表中查找 pid 对应楼层，计算偏移并滚动定位
+  /// 帖子 ID → GlobalKey 映射，用于引用跳转精确定位
+  final Map<int, GlobalKey> _postKeys = {};
+
+  /// 在帖子列表中查找 pid 对应楼层，使用 GlobalKey 精确滚动
   void _scrollToPost(int pid) {
-    if (!_scrollController.hasClients) return;
-    final index = _posts.indexWhere((p) => p.postId == pid);
-    if (index < 0) return;
-    // 每个 _PostCard 上下各 8px padding + 分割线高度
-    const double itemEstimate = 320;
-    final offset = index * itemEstimate;
-    final maxOffset = _scrollController.position.maxScrollExtent;
-    _scrollController.animateTo(
-      offset.clamp(0, maxOffset),
+    final key = _postKeys[pid];
+    if (key?.currentContext == null) return;
+    Scrollable.ensureVisible(
+      key!.currentContext!,
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeInOut,
+      alignment: 0.1, // 略微偏顶部
     );
   }
 
@@ -350,6 +350,7 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
                   : post.floorNumber;
               final postComments = _comments[post.postId] ?? const <ForumComment>[];
               return _PostCard(
+                key: _postKeys.putIfAbsent(post.postId, () => GlobalKey()),
                 post: post,
                 displayFloorNumber: displayFloorNumber,
                 isThreadAuthor: _isPostByThreadAuthor(post),
@@ -623,11 +624,20 @@ Widget? _buildJavBusHtmlWidget(
   return JavBusPostVideoPreview(
     url: url,
     maxWidth: contentWidth,
-    onOpen: () => launchInExternalBrowser(url),
+    onOpen: () => _showJavBusVideoPreview(context, url),
   );
 }
 
-void _showJavBusImagePreview(BuildContext context, String url) {
+void _showJavBusVideoPreview(BuildContext context, String url) {
+    final semanticColors = Theme.of(context).appSemanticColors;
+    showDialog<void>(
+      context: context,
+      barrierColor: semanticColors.imagePreviewScrim.withValues(alpha: 0.82),
+      builder: (context) => JavBusVideoPlayerDialog(url: url),
+    );
+  }
+
+  void _showJavBusImagePreview(BuildContext context, String url) {
   final semanticColors = Theme.of(context).appSemanticColors;
   showDialog<void>(
     context: context,
@@ -1050,6 +1060,45 @@ class JavBusImagePreviewDialog extends StatelessWidget {
             child: SafeArea(
               child: IconButton.filledTonal(
                 tooltip: '关闭图片预览',
+                onPressed: () => Navigator.of(context).maybePop(),
+                icon: const Icon(Icons.close_rounded),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class JavBusVideoPlayerDialog extends StatelessWidget {
+  const JavBusVideoPlayerDialog({super.key, required this.url});
+
+  final String url;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final semanticColors = theme.appSemanticColors;
+    return Dialog.fullscreen(
+      backgroundColor: semanticColors.imagePreviewBackground,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: InAppWebView(
+              initialUrlRequest: URLRequest(url: WebUri(url)),
+              initialSettings: InAppWebViewSettings(
+                mediaPlaybackRequiresUserGesture: false,
+                allowsInlineMediaPlayback: true,
+              ),
+            ),
+          ),
+          Positioned(
+            top: 16,
+            right: 16,
+            child: SafeArea(
+              child: IconButton.filledTonal(
+                tooltip: '关闭视频',
                 onPressed: () => Navigator.of(context).maybePop(),
                 icon: const Icon(Icons.close_rounded),
               ),
