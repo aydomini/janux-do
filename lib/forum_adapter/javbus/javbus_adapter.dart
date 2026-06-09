@@ -18,7 +18,11 @@ class JavbusAdapter extends ForumAdapter {
     JavBusApiMapper? apiMapper,
     JavBusUrlBuilder urlBuilder = const JavBusUrlBuilder(),
     DiscuzTimeParser? timeParser,
-  }) : _dio = dio ?? Dio(),
+  }) : _dio = dio ??
+           Dio(BaseOptions(
+             connectTimeout: const Duration(seconds: 15),
+             receiveTimeout: const Duration(seconds: 30),
+           )),
        _apiMapper = apiMapper ?? JavBusApiMapper(urlBuilder: urlBuilder),
        _forumIndexParser = ForumIndexParser(urlBuilder: urlBuilder),
        _forumDisplayParser = ForumDisplayParser(
@@ -102,7 +106,7 @@ class JavbusAdapter extends ForumAdapter {
     bool browserNavigation = false,
   }) async {
     DioException? lastTransientError;
-    for (var attempt = 0; attempt < 2; attempt++) {
+    for (var attempt = 0; attempt < 4; attempt++) {
       try {
         return await _getHtmlOnce(
           uri,
@@ -111,8 +115,9 @@ class JavbusAdapter extends ForumAdapter {
           browserNavigation: browserNavigation,
         );
       } on DioException catch (error) {
-        if (attempt == 0 && _isTransientNetworkError(error)) {
+        if (attempt < 3 && _isTransientNetworkError(error)) {
           lastTransientError = error;
+          await Future.delayed(Duration(milliseconds: 400 * (attempt + 1)));
           continue;
         }
         _throwForumNetworkError(uri, error);

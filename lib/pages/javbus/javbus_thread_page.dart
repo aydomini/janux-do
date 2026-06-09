@@ -9,12 +9,13 @@ import '../../forum_adapter/models/forum_post.dart';
 import '../../providers/forum_provider.dart';
 import '../../services/highlighter_service.dart';
 import '../../services/javbus_cache_manager.dart';
-import '../../services/network/cookie/cookie_jar_service.dart';
+
 import '../../theme/app_semantic_colors.dart';
 import '../../theme/app_typography.dart';
 import '../../utils/link_launcher.dart';
 import '../../widgets/common/error_view.dart';
 import '../../widgets/common/loading_spinner.dart';
+import 'image_header_service.dart';
 import 'javbus_layout.dart';
 
 class JavBusThreadPage extends ConsumerStatefulWidget {
@@ -166,6 +167,7 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
           ..clear()
           ..addAll(result.posts);
         _trackThreadAuthor();
+        ImageHeaderService.instance.refresh();
         _currentPage = result.currentPage;
         _hasNextPage = result.hasNextPage;
         _isLoadingInitial = false;
@@ -198,6 +200,7 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
       setState(() {
         final addedPostCount = _mergePosts(result.posts);
         _trackThreadAuthor();
+        ImageHeaderService.instance.refresh();
         _currentPage = result.currentPage < requestedPage
             ? requestedPage
             : result.currentPage;
@@ -852,19 +855,8 @@ class JavBusPostImage extends StatelessWidget {
   final double maxWidth;
   final VoidCallback onOpen;
 
-  /// 头像请求头（UC 服务器拒绝带 Referer 的请求）
-  static const avatarHeaders = {
-    'User-Agent':
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/605.1.15 '
-        '(KHTML, like Gecko) Version/17.5 Safari/605.1.15',
-  };
-
-  static const httpHeaders = {
-    'User-Agent':
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/605.1.15 '
-        '(KHTML, like Gecko) Version/17.5 Safari/605.1.15',
-    'Referer': 'https://www.javbus.com/',
-  };
+  /// 图片请求头（含 cookie 缓存，由 ImageHeaderService 统一管理）
+  static Map<String, String> get httpHeaders => ImageHeaderService.instance.headers;
 
   @override
   Widget build(BuildContext context) {
@@ -885,7 +877,7 @@ class JavBusPostImage extends StatelessWidget {
               color: theme.colorScheme.surfaceContainerHighest,
               child: CachedNetworkImage(
                 imageUrl: url,
-                httpHeaders: httpHeaders,
+                httpHeaders: ImageHeaderService.instance.headers,
                 cacheManager: JavBusPostImageCacheManager(),
                 fit: BoxFit.contain,
                 placeholder: (context, url) => const Center(
@@ -927,7 +919,7 @@ class JavBusImagePreviewDialog extends StatelessWidget {
 
   final String url;
 
-  static const httpHeaders = JavBusPostImage.httpHeaders;
+  static Map<String, String> get httpHeaders => ImageHeaderService.instance.headers;
 
   @override
   Widget build(BuildContext context) {
@@ -996,7 +988,7 @@ class JavBusInlineEmojiImage extends StatelessWidget {
   Widget build(BuildContext context) {
     return CachedNetworkImage(
       imageUrl: url,
-      httpHeaders: JavBusPostImage.httpHeaders,
+      httpHeaders: ImageHeaderService.instance.headers,
       cacheManager: JavBusEmojiCacheManager(),
       width: _inlineEmojiSize,
       height: _inlineEmojiSize,
@@ -1091,50 +1083,16 @@ bool _isInlineEmojiImage(dom.Element element, String resolvedUrl) {
   return width <= 48 && height <= 48;
 }
 
-class _PostAvatar extends StatefulWidget {
+class _PostAvatar extends StatelessWidget {
   const _PostAvatar({required this.avatarUrl});
 
   final String? avatarUrl;
 
   @override
-  State<_PostAvatar> createState() => _PostAvatarState();
-}
-
-class _PostAvatarState extends State<_PostAvatar> {
-  String? _cookieHeader;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadCookieHeader();
-  }
-
-  Future<void> _loadCookieHeader() async {
-    try {
-      final jar = CookieJarService();
-      if (!jar.isInitialized) await jar.initialize();
-      final cfClearance = await jar.getCfClearance();
-      if (cfClearance != null && cfClearance.isNotEmpty && mounted) {
-        setState(() => _cookieHeader = 'cf_clearance=$cfClearance');
-      }
-    } catch (_) {}
-  }
-
-  Map<String, String> _buildHeaders() {
-    return {
-      'User-Agent':
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/605.1.15 '
-              '(KHTML, like Gecko) Version/17.5 Safari/605.1.15',
-      'Referer': 'https://www.javbus.com/forum/',
-      if (_cookieHeader != null) 'Cookie': _cookieHeader!,
-    };
-  }
-
-  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     const double size = 56;
-    final url = widget.avatarUrl;
+    final url = avatarUrl;
 
     if (url == null || url.isEmpty) {
       return CircleAvatar(
@@ -1150,7 +1108,7 @@ class _PostAvatarState extends State<_PostAvatar> {
       child: ClipOval(
         child: CachedNetworkImage(
           imageUrl: url,
-          httpHeaders: _buildHeaders(),
+          httpHeaders: ImageHeaderService.instance.headers,
           cacheManager: JavBusAvatarCacheManager(),
           fit: BoxFit.cover,
           placeholder: (context, url) => Container(
