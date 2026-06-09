@@ -10,6 +10,7 @@ import '../../forum_adapter/models/forum_post.dart';
 import '../../providers/forum_provider.dart';
 import '../../services/highlighter_service.dart';
 import '../../services/javbus_cache_manager.dart';
+import '../../services/network/cookie/cookie_jar_service.dart';
 
 import '../../theme/app_semantic_colors.dart';
 import '../../theme/app_typography.dart';
@@ -75,9 +76,6 @@ class JavBusThreadContent extends ConsumerStatefulWidget {
   ConsumerState<JavBusThreadContent> createState() =>
       _JavBusThreadContentState();
 }
-
-/// 编译时测试环境检测：FLUTTER_TEST 由 Flutter 测试框架自动注入
-const bool _isTest = bool.fromEnvironment('FLUTTER_TEST');
 
 class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
   final ScrollController _scrollController = ScrollController();
@@ -173,13 +171,13 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
           .getPosts(threadId: widget.threadId);
       if (!mounted) return;
       // 确保 Cookie 在图片加载前就绪，避免附件图片等需要鉴权的请求失败
-      // 测试环境跳过：CookieJarService 依赖 platform channel，测试中无 mock 会阻塞
-      if (!_isTest) {
-        try {
+      // CookieJarService 未初始化时跳过（测试环境缺少 platform channel mock）
+      try {
+        if (CookieJarService().isInitialized) {
           await ImageHeaderService.instance.refresh();
-        } catch (_) {
-          // refresh 失败不影响帖子内容显示，图片可能缺少 Cookie
         }
+      } catch (_) {
+        // refresh 失败不影响帖子内容显示，图片可能缺少 Cookie
       }
       setState(() {
         _posts
