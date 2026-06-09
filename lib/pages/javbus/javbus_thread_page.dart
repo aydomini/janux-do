@@ -272,8 +272,8 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
     final slowCtx = _postKeys[pid]?.currentContext;
     if (slowCtx != null) {
       // slowCtx 来自 GlobalKey，非 widget context，null 检查已足够
-      // ignore: use_build_context_synchronously
       Scrollable.ensureVisible(
+        // ignore: use_build_context_synchronously
         slowCtx,
         duration: const Duration(milliseconds: 200),
         curve: Curves.easeInOut,
