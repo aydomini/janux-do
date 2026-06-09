@@ -238,7 +238,7 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
   /// 1. 快速路径：目标在视口内 → GlobalKey 精确跳转
   /// 2. 慢速路径：目标已被 ListView 回收（离屏）→ 按索引比例估算偏移
   ///    animateTo 将目标拉入视口 → Widget 重建后 ensureVisible 精确修正
-  void _scrollToPost(int pid) {
+  Future<void> _scrollToPost(int pid) async {
     final key = _postKeys[pid];
 
     // 快速路径：目标在当前 Widget 树中，直接精确跳转
@@ -262,26 +262,22 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
     final estimatedOffset =
         targetIndex / _posts.length * position.maxScrollExtent;
 
-    _scrollController
-        .animateTo(
-          estimatedOffset.clamp(0.0, position.maxScrollExtent),
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeInOut,
-        )
-        .then((_) {
-          if (!mounted) return;
-          // GlobalKey.currentContext 不受 widget 生命周期影响，mounted 检查已保证安全
-          // ignore: use_build_context_synchronously
-          final slowCtx = _postKeys[pid]?.currentContext;
-          if (slowCtx != null) {
-            Scrollable.ensureVisible(
-              slowCtx,
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeInOut,
-              alignment: 0.1,
-            );
-          }
-        });
+    await _scrollController.animateTo(
+      estimatedOffset.clamp(0.0, position.maxScrollExtent),
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
+
+    if (!mounted) return;
+    final slowCtx = _postKeys[pid]?.currentContext;
+    if (slowCtx != null) {
+      Scrollable.ensureVisible(
+        slowCtx,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeInOut,
+        alignment: 0.1,
+      );
+    }
   }
 
   final Set<int> _loadedCommentPages = {};
@@ -396,7 +392,7 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
                 displayFloorNumber: displayFloorNumber,
                 isThreadAuthor: _isPostByThreadAuthor(post),
                 comments: postComments,
-                onQuoteTapped: _scrollToPost,
+                onQuoteTapped: (pid) => _scrollToPost(pid),
               );
             },
           ),
