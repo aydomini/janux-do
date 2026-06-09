@@ -83,6 +83,7 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
   bool _isLoadingMore = false;
   Object? _error;
   StackTrace? _stackTrace;
+  int? _threadAuthorId;
 
   @override
   void initState() {
@@ -163,6 +164,7 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
         _posts
           ..clear()
           ..addAll(result.posts);
+        _trackThreadAuthor();
         _currentPage = result.currentPage;
         _hasNextPage = result.hasNextPage;
         _isLoadingInitial = false;
@@ -194,6 +196,7 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
       if (!mounted) return;
       setState(() {
         final addedPostCount = _mergePosts(result.posts);
+        _trackThreadAuthor();
         _currentPage = result.currentPage < requestedPage
             ? requestedPage
             : result.currentPage;
@@ -211,6 +214,21 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
         _isLoadingMore = false;
       });
     }
+  }
+
+  void _trackThreadAuthor() {
+    if (_threadAuthorId != null) return;
+    for (final post in _posts) {
+      if (post.authorId != null &&
+          (post.floorNumber == 1 || post.isThreadAuthor)) {
+        _threadAuthorId = post.authorId;
+        return;
+      }
+    }
+  }
+
+  bool _isPostByThreadAuthor(ForumPost post) {
+    return _threadAuthorId != null && post.authorId == _threadAuthorId;
   }
 
   int _mergePosts(List<ForumPost> incoming) {
@@ -285,6 +303,7 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
               return _PostCard(
                 post: post,
                 displayFloorNumber: displayFloorNumber,
+                isThreadAuthor: _isPostByThreadAuthor(post),
               );
             },
           );
@@ -295,10 +314,15 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
 }
 
 class _PostCard extends StatelessWidget {
-  const _PostCard({required this.post, required this.displayFloorNumber});
+  const _PostCard({
+    required this.post,
+    required this.displayFloorNumber,
+    required this.isThreadAuthor,
+  });
 
   final ForumPost post;
   final int displayFloorNumber;
+  final bool isThreadAuthor;
 
   @override
   Widget build(BuildContext context) {
@@ -316,20 +340,7 @@ class _PostCard extends StatelessWidget {
             children: [
               Padding(
                 padding: const EdgeInsets.only(top: 2),
-                child: CircleAvatar(
-                  radius: 28,
-                  backgroundColor: theme.colorScheme.primaryContainer,
-                  foregroundImage: avatarUrl == null
-                      ? null
-                      : CachedNetworkImageProvider(
-                          avatarUrl,
-                          headers: JavBusPostImage.avatarHeaders,
-                          cacheManager: JavBusAvatarCacheManager(),
-                        ),
-                  child: avatarUrl == null
-                      ? const Icon(Icons.person_outline_rounded, size: 28)
-                      : null,
-                ),
+                child: _PostAvatar(avatarUrl: avatarUrl),
               ),
               const SizedBox(width: 18),
               Expanded(
@@ -349,7 +360,7 @@ class _PostCard extends StatelessWidget {
                             ),
                           ),
                         ),
-                        if (post.isThreadAuthor) ...[
+                        if (isThreadAuthor) ...[
                           const SizedBox(width: 8),
                           const _AuthorBadge(label: '楼主'),
                         ],
@@ -1077,6 +1088,61 @@ bool _isInlineEmojiImage(dom.Element element, String resolvedUrl) {
   final height = double.tryParse(element.attributes['height'] ?? '');
   if (width == null || height == null) return false;
   return width <= 48 && height <= 48;
+}
+
+class _PostAvatar extends StatelessWidget {
+  const _PostAvatar({required this.avatarUrl});
+
+  final String? avatarUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    const double size = 56;
+
+    if (avatarUrl == null || avatarUrl!.isEmpty) {
+      return CircleAvatar(
+        radius: size / 2,
+        backgroundColor: theme.colorScheme.primaryContainer,
+        child: const Icon(Icons.person_outline_rounded, size: 28),
+      );
+    }
+
+    return SizedBox(
+      width: size,
+      height: size,
+      child: ClipOval(
+        child: CachedNetworkImage(
+          imageUrl: avatarUrl!,
+          httpHeaders: JavBusPostImage.avatarHeaders,
+          cacheManager: JavBusAvatarCacheManager(),
+          fit: BoxFit.cover,
+          placeholder: (context, url) => Container(
+            color: theme.colorScheme.primaryContainer,
+            child: Center(
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: theme.colorScheme.onPrimaryContainer,
+                ),
+              ),
+            ),
+          ),
+          errorWidget: (context, url, error) => CircleAvatar(
+            radius: size / 2,
+            backgroundColor: theme.colorScheme.primaryContainer,
+            child: Icon(
+              Icons.person_outline_rounded,
+              size: 28,
+              color: theme.colorScheme.onPrimaryContainer,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _LoadMoreFooter extends StatelessWidget {

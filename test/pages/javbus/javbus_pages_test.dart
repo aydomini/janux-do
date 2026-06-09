@@ -124,6 +124,7 @@ class _FakeForumAdapter extends ForumAdapter {
           floorNumber: repeatedFloorNumbers
               ? index + 1
               : (page - 1) * postsPerPage + index + 1,
+          authorId: page == 1 && index == 0 ? 9001 : 9002 + index,
           author: index == 0 && page == 1 ? '楼主' : '回复者$index',
           avatarUrl: 'https://www.javbus.com/forum/avatar-$index.jpg',
           contentHtml: _postContentHtml(index: index, page: page),
@@ -217,7 +218,7 @@ void main() {
     expect(find.text('日本AV'), findsOneWidget);
     expect(find.textContaining('120 主题'), findsOneWidget);
     expect(find.text('普通主题 P1'), findsOneWidget);
-    expect(find.textContaining('2026-06-08'), findsOneWidget);
+    expect(find.textContaining('天前'), findsOneWidget);
     expect(find.text('话题'), findsOneWidget);
     expect(find.text('回复'), findsOneWidget);
     expect(find.text('时间'), findsOneWidget);
@@ -606,13 +607,14 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
-    final avatar = tester.widget<CircleAvatar>(find.byType(CircleAvatar));
-    final imageProvider = avatar.foregroundImage;
-    expect(imageProvider, isA<CachedNetworkImageProvider>());
-    expect(
-      (imageProvider! as CachedNetworkImageProvider).cacheManager,
-      isA<JavBusAvatarCacheManager>(),
+    // _PostAvatar 内部使用 ClipOval + CachedNetworkImage
+    final avatarImage = tester.widget<CachedNetworkImage>(
+      find.descendant(
+        of: find.byType(ClipOval),
+        matching: find.byType(CachedNetworkImage),
+      ),
     );
+    expect(avatarImage.cacheManager, isA<JavBusAvatarCacheManager>());
   });
 
   testWidgets('JavBus 主题页统一渲染行内代码、代码块和引用块', (tester) async {

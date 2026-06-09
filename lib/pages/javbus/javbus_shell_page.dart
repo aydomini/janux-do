@@ -1036,6 +1036,18 @@ String _forumSubtitle(ForumForum forum) {
 
 String _formatThreadTime(DateTime? value) {
   if (value == null) return '';
+  final now = DateTime.now();
+  final diff = now.difference(value);
+
+  // 1周内使用相对时间
+  if (diff.inDays < 7) {
+    if (diff.inSeconds < 60) return '刚刚';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}分钟前';
+    if (diff.inHours < 24) return '${diff.inHours}小时前';
+    return '${diff.inDays}天前';
+  }
+
+  // 超过1周使用绝对时间（日期在上，时间在下）
   String two(int input) => input.toString().padLeft(2, '0');
   return '${value.year}-${two(value.month)}-${two(value.day)}\n'
       '${two(value.hour)}:${two(value.minute)}';
