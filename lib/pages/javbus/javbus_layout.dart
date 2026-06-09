@@ -10,9 +10,9 @@ class JavBusLayout {
   static const double contentHorizontalPadding = 24;
   static const double listHorizontalPadding = 24;
   static const double postMetaColumnWidth = 150;
-  static const double topicReplyColumnWidth = 100;
-  static const double topicViewsColumnWidth = 100;
-  static const double topicTimeColumnWidth = 150;
+  static const double topicReplyColumnWidth = 120;
+  static const double topicViewsColumnWidth = 120;
+  static const double topicTimeColumnWidth = 120;
   static const double mediaPreviewMinWidth = 260;
   static const double mediaPreviewMaxWidth = 480;
   static const double mediaPreviewHeight = 270;

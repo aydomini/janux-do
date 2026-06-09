@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:jovial_svg/jovial_svg.dart';
 
+import '../../forum_adapter/adapter.dart';
 import '../../forum_adapter/models/forum_forum.dart';
 import '../../forum_adapter/models/forum_thread.dart';
 import '../../providers/forum_provider.dart';
@@ -271,17 +272,6 @@ class _ForumSidebar extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(height: 20),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(58, 0, 14, 0),
-              child: Text(
-                '分区',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
             const SizedBox(height: 8),
             Expanded(
               child: ListView.builder(
@@ -438,6 +428,21 @@ class _ThreadListPaneState extends ConsumerState<_ThreadListPane> {
   Object? _error;
   StackTrace? _stackTrace;
   final Map<int, int> _viewCounts = {};
+  SortMode? _sortMode = SortMode.latest;
+
+  void _selectSort(SortMode? mode) {
+    if (_sortMode == mode) return;
+    setState(() {
+      _sortMode = mode;
+      _threads.clear();
+      _currentPage = 1;
+      _totalPages = 1;
+      _hasNextPage = true;
+      _isLoadingInitial = true;
+      _error = null;
+    });
+    Future.microtask(_refreshThreads);
+  }
 
   @override
   void initState() {
@@ -493,20 +498,11 @@ class _ThreadListPaneState extends ConsumerState<_ThreadListPane> {
     _currentPage = widget.cache.currentPage;
     _totalPages = widget.cache.totalPages;
     _hasNextPage = widget.cache.hasNextPage;
+    _sortMode = widget.cache.sortMode;
     _isLoadingInitial = false;
     _isLoadingMore = false;
     _error = null;
     _stackTrace = null;
-  }
-
-  void _restoreScrollOffset() {
-    final offset = widget.cache.scrollOffset;
-    if (offset <= 0) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scrollController.hasClients) return;
-      final maxOffset = _scrollController.position.maxScrollExtent;
-      _scrollController.jumpTo(offset.clamp(0, maxOffset));
-    });
   }
 
   void _saveCache() {
@@ -520,10 +516,21 @@ class _ThreadListPaneState extends ConsumerState<_ThreadListPane> {
       ..currentPage = _currentPage
       ..totalPages = _totalPages
       ..hasNextPage = _hasNextPage
+      ..sortMode = _sortMode
       ..hasLoaded = !_isLoadingInitial && _threads.isNotEmpty;
     if (_scrollController.hasClients) {
       widget.cache.scrollOffset = _scrollController.position.pixels;
     }
+  }
+
+  void _restoreScrollOffset() {
+    final offset = widget.cache.scrollOffset;
+    if (offset <= 0) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) return;
+      final maxOffset = _scrollController.position.maxScrollExtent;
+      _scrollController.jumpTo(offset.clamp(0, maxOffset));
+    });
   }
 
   Future<void> _refreshThreads() async {
@@ -537,6 +544,7 @@ class _ThreadListPaneState extends ConsumerState<_ThreadListPane> {
       final result = await ref.read(forumAdapterProvider).getThreads(
         forumId: widget.forum.forumId,
         filterTypeId: widget.forum.filterTypeId,
+        sort: _sortMode,
       );
       if (!mounted) return;
       setState(() {
@@ -572,6 +580,7 @@ class _ThreadListPaneState extends ConsumerState<_ThreadListPane> {
         forumId: widget.forum.forumId,
         filterTypeId: widget.forum.filterTypeId,
         page: requestedPage,
+        sort: _sortMode,
       );
       if (!mounted) return;
       setState(() {
@@ -604,6 +613,7 @@ class _ThreadListPaneState extends ConsumerState<_ThreadListPane> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _ThreadListHeader(forum: widget.forum, onRefresh: _refreshThreads),
+        _SortBar(selectedSort: _sortMode, onSelectSort: _selectSort),
         const Divider(height: 1),
         Expanded(
           child: error != null && _threads.isEmpty
@@ -666,6 +676,7 @@ class _ThreadListPaneCache {
   bool hasNextPage = true;
   bool hasLoaded = false;
   double scrollOffset = 0;
+  SortMode? sortMode;
 }
 
 class _ThreadListHeader extends StatelessWidget {
@@ -719,6 +730,81 @@ class _ThreadListHeader extends StatelessWidget {
   }
 }
 
+class _SortBar extends StatelessWidget {
+  const _SortBar({required this.selectedSort, required this.onSelectSort});
+
+  final SortMode? selectedSort;
+  final void Function(SortMode?) onSelectSort;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    const items = [
+      (SortMode.latest, '最新'),
+      (SortMode.hot, '熱門'),
+      (SortMode.trending, '熱帖'),
+      (SortMode.digest, '精華'),
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        JavBusLayout.listHorizontalPadding,
+        0,
+        JavBusLayout.listHorizontalPadding,
+        0,
+      ),
+      child: Row(
+        children: [
+          const SizedBox(width: 28),      // icon
+          const SizedBox(width: 18),
+          const Expanded(child: SizedBox()), // 话题占位
+          const SizedBox(width: 18),       // gap
+          // 4 个按钮均匀分布在浏览→时间的总区域内（396px）
+          SizedBox(
+            width: JavBusLayout.topicViewsColumnWidth * 3 + 18 * 2,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                for (final (mode, label) in items)
+                  GestureDetector(
+                    onTap: () => onSelectSort(mode),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const SizedBox(height: 4),
+                        Text(
+                          label,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: mode == selectedSort
+                                ? theme.colorScheme.primary
+                                : theme.colorScheme.onSurfaceVariant,
+                            fontWeight: FontWeight.w400,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          height: 2,
+                          width: mode == selectedSort ? 20 : 0,
+                          decoration: BoxDecoration(
+                            color: mode == selectedSort
+                                ? theme.colorScheme.primary
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(1),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ThreadTableHeader extends StatelessWidget {
   const _ThreadTableHeader();
 
@@ -739,6 +825,7 @@ class _ThreadTableHeader extends StatelessWidget {
       child: Row(
         children: [
           const SizedBox(width: 28),
+          const SizedBox(width: 18),
           Expanded(child: Text('话题', style: labelStyle)),
           const SizedBox(width: 18),
           SizedBox(
@@ -750,7 +837,7 @@ class _ThreadTableHeader extends StatelessWidget {
             width: JavBusLayout.topicReplyColumnWidth,
             child: Text('回复', textAlign: TextAlign.center, style: labelStyle),
           ),
-          const SizedBox(width: 24),
+          const SizedBox(width: 18),
           SizedBox(
             width: JavBusLayout.topicTimeColumnWidth,
             child: Text('时间', textAlign: TextAlign.center, style: labelStyle),
@@ -796,6 +883,7 @@ class _ThreadRow extends StatelessWidget {
                     : theme.colorScheme.onSurfaceVariant,
               ),
             ),
+            const SizedBox(width: 18),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -849,7 +937,7 @@ class _ThreadRow extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(width: 24),
+            const SizedBox(width: 18),
             SizedBox(
               width: JavBusLayout.topicTimeColumnWidth,
               child: Text(

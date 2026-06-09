@@ -1,3 +1,4 @@
+import '../../adapter.dart';
 import 'utils/url_builder.dart';
 
 class JavBusApiMapper {
@@ -30,8 +31,13 @@ class JavBusApiMapper {
     return _mobileApi({'module': 'viewthread', 'tid': '$tid', 'page': '$page'});
   }
 
-  /// 桌面版版块列表 URL（包含完整浏览量和过滤参数）
-  Uri desktopForumDisplay({required int fid, int? filterTypeId, int page = 1}) {
+  /// 桌面版版块列表 URL（包含完整浏览量和过滤参数 + 排序）
+  Uri desktopForumDisplay({
+    required int fid,
+    int? filterTypeId,
+    int page = 1,
+    SortMode? sort,
+  }) {
     final base = urlBuilder.baseUri.resolve('forum.php');
     return base.replace(queryParameters: {
       'mod': 'forumdisplay',
@@ -40,6 +46,12 @@ class JavBusApiMapper {
       if (filterTypeId != null) ...{
         'filter': 'typeid',
         'typeid': '$filterTypeId',
+      } else ...switch (sort) {
+        SortMode.latest => {'filter': 'lastpost', 'orderby': 'lastpost'},
+        SortMode.hot => {'filter': 'heat', 'orderby': 'heats'},
+        SortMode.trending => {'filter': 'hot'},
+        SortMode.digest => {'filter': 'digest', 'digest': '1'},
+        _ => <String, String>{},
       },
     });
   }
@@ -55,8 +67,8 @@ class JavBusApiMapper {
   }
 
   /// 点评分页 AJAX 接口（第 2 页及以后）
-  /// URL: forum.php?mod=misc&action=commentmore&tid={tid}&pid={pid}&page={page}
-  Uri commentMore({required int tid, required int pid, int page = 1}) {
+  /// URL: forum.php?mod=misc&action=commentmore&tid={tid}&pid={pid}&page={page}&formhash=XXX
+  Uri commentMore({required int tid, required int pid, int page = 1, String? formhash}) {
     final base = urlBuilder.baseUri.resolve('forum.php');
     return base.replace(queryParameters: {
       'mod': 'misc',
@@ -64,6 +76,7 @@ class JavBusApiMapper {
       'tid': '$tid',
       'pid': '$pid',
       'page': '$page',
+      if (formhash != null) 'formhash': formhash,
     });
   }
 

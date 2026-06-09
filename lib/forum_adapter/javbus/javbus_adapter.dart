@@ -145,24 +145,28 @@ class JavbusAdapter extends ForumAdapter {
     required int forumId,
     int? filterTypeId,
     int page = 1,
+    SortMode? sort,
   }) async {
-    final mobileUri = _apiMapper.forumDisplay(
+    final uri = _apiMapper.desktopForumDisplay(
       fid: forumId,
       filterTypeId: filterTypeId,
       page: page,
+      sort: sort,
     );
-    // 并发送两个请求：移动端拿主题列表（元数据准确），桌面端拿浏览量
-    final results = await Future.wait([
-      _getHtml(mobileUri, userAgent: mobileUserAgent, referer: _lastDesktopReferer),
-      _fetchThreadViewCounts(forumId, page: page),
-    ]);
-    final html = results[0] as String;
-    final viewCounts = results[1] as Map<int, int>;
+    final html = await _getHtml(
+      uri,
+      userAgent: desktopUserAgent,
+      referer: _lastDesktopReferer,
+      browserNavigation: true,
+    );
+    _lastDesktopReferer = uri.toString();
     final result = _forumDisplayParser.parse(
       html,
       forumId: forumId,
-      requestUrl: mobileUri.toString(),
+      requestUrl: uri.toString(),
     );
+    // 浏览量和主题来自同一份桌面版 HTML，真正原子加载
+    final viewCounts = ForumDisplayParser.parseThreadViews(html);
     return ThreadListResult(
       threads: result.threads,
       currentPage: result.currentPage,
@@ -170,23 +174,6 @@ class JavbusAdapter extends ForumAdapter {
       hasNextPage: result.hasNextPage,
       viewCounts: viewCounts,
     );
-  }
-
-  Future<Map<int, int>> _fetchThreadViewCounts(int forumId, {int page = 1}) async {
-    final uri = _apiMapper.desktopForumDisplay(fid: forumId, page: page);
-    try {
-      final html = await _getHtml(
-        uri,
-        userAgent: desktopUserAgent,
-        referer: _lastDesktopReferer,
-        browserNavigation: true,
-      );
-      return ForumDisplayParser.parseThreadViews(html);
-    } on DioException {
-      return {};
-    } on ForumException {
-      return {};
-    }
   }
 
   @override
@@ -224,6 +211,8 @@ class JavbusAdapter extends ForumAdapter {
       _lastDesktopReferer = uri.toString();
       // 解析第 1 页点评
       final allComments = ViewThreadParser.parseComments(html);
+      // 提取 formhash（Discuz CSRF token），commentmore 翻页必须带
+      final formhash = _extractFormhash(html);
       // 检查哪些帖子有更多点评页
       final pagination = ViewThreadParser.parseCommentPagination(html);
       // 逐帖逐页抓取点评，动态检测是否还有下一页
@@ -239,12 +228,12 @@ class JavbusAdapter extends ForumAdapter {
               tid: threadId,
               pid: pid,
               page: cp,
+              formhash: formhash,
             );
             final moreHtml = await _getHtml(
               moreUri,
               userAgent: desktopUserAgent,
               referer: _lastDesktopReferer,
-              browserNavigation: true,
             );
             final moreComments = ViewThreadParser.parseComments(
               moreHtml,
@@ -423,6 +412,14 @@ class JavbusAdapter extends ForumAdapter {
     } catch (_) {
       return false;
     }
+  }
+
+  /// 从 HTML 中提取 formhash（Discuz CSRF token）
+  static String? _extractFormhash(String html) {
+    final match = RegExp(
+      r'<input[^>]*name="formhash"[^>]*value="([^"]*)"',
+    ).firstMatch(html);
+    return match?.group(1);
   }
 
   static String _snippet(String text, {int maxLength = 300}) {

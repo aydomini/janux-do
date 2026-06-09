@@ -25,15 +25,24 @@ class ForumDisplayParser {
     final threads = <ForumThread>[];
     final seenThreadIds = <int>{};
 
-    for (final anchor in document.querySelectorAll('a[href]')) {
+    // 桌面版：从 normalthread_ / stickthread_ 容器内取 tid 链接
+    // 移动版：容器无这些 ID，回退
+    var anchors = document.querySelectorAll('[id*="thread_"] a[href*="tid="]');
+    if (anchors.isEmpty) {
+      anchors = document.querySelectorAll('.thread a[href*="tid="]');
+    }
+    if (anchors.isEmpty) {
+      anchors = document.querySelectorAll('a[href]');
+    }
+    for (final anchor in anchors) {
       final href = anchor.attributes['href'] ?? '';
       final threadId = _extractQueryInt(href, 'tid');
       if (_isThreadIcon(anchor)) continue;
       if (threadId == null || !seenThreadIds.add(threadId)) continue;
 
-      final container = _nearestThreadContainer(anchor);
+      final container = _closestNormalthread(anchor) ?? _nearestThreadContainer(anchor);
       final text = container?.text.trim() ?? anchor.text.trim();
-      final stats = _extractStats(text);
+      final stats = _extractStatsFromContainer(container);
       final author = _extractAuthor(container);
       final createdAtText = _extractTimeText(container, text);
       final createdAt = timeParser.parse(createdAtText) ?? DateTime.now();
@@ -71,6 +80,19 @@ class ForumDisplayParser {
     );
   }
 
+  /// 向上查找 normalthread_ / stickthread_ 祖先元素（真实桌面版 HTML）
+  static Element? _closestNormalthread(Element element) {
+    Element? current = element;
+    while (current != null && current.localName != 'body') {
+      final id = current.attributes['id'] ?? '';
+      if (id.startsWith('normalthread_') || id.startsWith('stickthread_')) {
+        return current;
+      }
+      current = current.parent;
+    }
+    return null;
+  }
+
   static Element? _nearestThreadContainer(Element element) {
     Element? current = element.parent;
     while (current != null && current.localName != 'body') {
@@ -93,6 +115,7 @@ class ForumDisplayParser {
 
   static String _extractTimeText(Element? container, String fallbackText) {
     final explicit =
+        _textOf(container, '.dateline') ??
         _textOf(container, '.time') ??
         _textOf(container, '.xg1') ??
         _textOf(container, '.by') ??
@@ -107,7 +130,9 @@ class ForumDisplayParser {
 
   static bool _isPinned(Element? element) {
     if (element == null) return false;
-    return element.classes.contains('pinned') ||
+    final id = element.attributes['id'] ?? '';
+    return id.startsWith('stickthread_') ||
+        element.classes.contains('pinned') ||
         element.text.contains('置顶') ||
         element.text.contains('置頂') ||
         element.querySelector('img[src*="pin_"]') != null;
@@ -172,6 +197,19 @@ _Stats _extractStats(String text) {
         : int.parse(mobileReplyMatch.group(1) ?? mobileReplyMatch.group(2)!),
     views: 0,
   );
+}
+
+/// 从桌面版 .nums 容器解析回复和浏览量
+/// <span class="views">62930</span><span class="reply">61</span>
+_Stats _extractStatsFromContainer(Element? container) {
+  if (container == null) return (replies: 0, views: 0);
+  final viewsEl = container.querySelector('.views');
+  final replyEl = container.querySelector('.reply');
+  final views = viewsEl != null ? int.tryParse(viewsEl.text.trim()) ?? 0 : 0;
+  final replies = replyEl != null ? int.tryParse(replyEl.text.trim()) ?? 0 : 0;
+  if (views > 0 || replies > 0) return (replies: replies, views: views);
+  // 回退到文本解析
+  return _extractStats(container.text);
 }
 
 _Author _extractAuthor(Element? container) {

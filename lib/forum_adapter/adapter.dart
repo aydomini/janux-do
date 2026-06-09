@@ -3,6 +3,8 @@ import 'models/forum_forum.dart';
 import 'models/forum_post.dart';
 import 'models/forum_results.dart';
 
+enum SortMode { latest, hot, trending, digest }
+
 abstract class ForumAdapter {
   Future<List<ForumForum>> getForums();
 
@@ -10,6 +12,7 @@ abstract class ForumAdapter {
     required int forumId,
     int? filterTypeId,
     int page = 1,
+    SortMode? sort,
   });
 
   Future<PostListResult> getPosts({required int threadId, int page = 1});

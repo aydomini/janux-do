@@ -312,7 +312,11 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
       onRefresh: _refreshPosts,
       child: LayoutBuilder(
         builder: (context, constraints) {
-          return ListView.separated(
+          return ScrollConfiguration(
+            behavior: ScrollConfiguration.of(context).copyWith(
+              scrollbars: false,
+            ),
+            child: ListView.separated(
             controller: _scrollController,
             padding: JavBusLayout.threadPadding,
             itemCount: _posts.length + 1,
@@ -353,7 +357,8 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
                 onQuoteTapped: _scrollToPost,
               );
             },
-          );
+          ),
+        );
         },
       ),
     );
@@ -1232,9 +1237,9 @@ class _CommentSectionState extends State<_CommentSection> {
     final visible = _visible;
     final hasMore = all.length > _previewCount;
 
-    final baseStyle = theme.textTheme.bodyMedium?.copyWith(
+    final baseStyle = theme.textTheme.bodyLarge?.copyWith(
       color: theme.colorScheme.onSurface,
-      height: 1.45,
+      height: 1.64,
     );
 
     return AnimatedSize(
@@ -1249,7 +1254,7 @@ class _CommentSectionState extends State<_CommentSection> {
           borderRadius: BorderRadius.circular(6),
         ),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
