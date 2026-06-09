@@ -9,7 +9,7 @@ class RawCookieWriter {
   RawCookieWriter._();
   static final instance = RawCookieWriter._();
 
-  static const _channel = MethodChannel('com.fluxdo/raw_cookie');
+  static const _channel = MethodChannel('com.github.aydomini.janux-do/raw_cookie');
 
   /// 是否支持当前平台
   /// Windows 走 CDP 不需要平台通道；Linux WPE 暂无原生通道实现

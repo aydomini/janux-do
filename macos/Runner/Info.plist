@@ -35,10 +35,10 @@
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>CFBundleURLName</key>
-			<string>com.fluxdo.app</string>
+			<string>com.github.aydomini.janux-do</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>fluxdo</string>
+				<string>janux-do</string>
 			</array>
 		</dict>
 	</array>

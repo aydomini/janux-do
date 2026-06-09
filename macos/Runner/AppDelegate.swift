@@ -30,7 +30,7 @@ class AppDelegate: FlutterAppDelegate {
 
     // Raw Set-Cookie 写入通道
     let rawCookieChannel = FlutterMethodChannel(
-      name: "com.fluxdo/raw_cookie",
+      name: "com.github.aydomini.janux-do/raw_cookie",
       binaryMessenger: controller.engine.binaryMessenger
     )
     rawCookieChannel.setMethodCallHandler { (call, result) in

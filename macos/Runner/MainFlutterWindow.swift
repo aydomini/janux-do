@@ -14,7 +14,7 @@ class MainFlutterWindow: NSWindow {
     // 注册 cookie 同步 channel，用于将 cookie 写入 HTTPCookieStorage.shared
     // WKWebView 的 sharedCookiesEnabled 在创建时从 HTTPCookieStorage.shared 读取 cookie
     let channel = FlutterMethodChannel(
-      name: "com.fluxdo/cookie_storage",
+      name: "com.github.aydomini.janux-do/cookie_storage",
       binaryMessenger: flutterViewController.engine.binaryMessenger
     )
     channel.setMethodCallHandler { (call, result) in
@@ -29,30 +29,6 @@ class MainFlutterWindow: NSWindow {
       case "clearCookies":
         let url = (call.arguments as? String) ?? ""
         self.clearCookiesFromSharedStorage(url: url)
-        result(true)
-      default:
-        result(FlutterMethodNotImplemented)
-      }
-    }
-
-    // 注册代理 CA 证书 channel（原生层 SSL challenge 拦截）
-    let proxyCertChannel = FlutterMethodChannel(
-      name: "com.fluxdo/proxy_cert",
-      binaryMessenger: flutterViewController.engine.binaryMessenger
-    )
-    proxyCertChannel.setMethodCallHandler { (call, result) in
-      switch call.method {
-      case "setCaCertPem":
-        guard let pem = call.arguments as? String else {
-          result(false)
-          return
-        }
-        let trusted = DohProxyCertHandler.shared.setCaCertPem(pem)
-        result(trusted)
-      case "isCaTrusted":
-        result(DohProxyCertHandler.shared.isCaTrusted())
-      case "clear":
-        DohProxyCertHandler.shared.clearCaCert()
         result(true)
       default:
         result(FlutterMethodNotImplemented)

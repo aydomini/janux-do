@@ -10,11 +10,9 @@
 	<true/>
 	<key>com.apple.security.network.client</key>
 	<true/>
-	<key>com.apple.security.files.user-selected.read-only</key>
-	<true/>
 	<key>com.apple.security.keychain-access-groups</key>
 	<array>
-		<string>$(AppIdentifierPrefix)com.github.lingyan000.fluxdo</string>
+		<string>$(AppIdentifierPrefix)com.github.aydomini.janux-do</string>
 	</array>
 </dict>
 </plist>
