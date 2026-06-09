@@ -6,7 +6,6 @@ import 'package:html/dom.dart' as dom;
 
 import '../../forum_adapter/javbus/utils/url_builder.dart';
 import '../../forum_adapter/models/forum_post.dart';
-import '../../forum_adapter/models/forum_results.dart';
 import '../../providers/forum_provider.dart';
 import '../../services/highlighter_service.dart';
 import '../../services/javbus_cache_manager.dart';
@@ -462,8 +461,7 @@ class _PostCard extends StatelessWidget {
               ),
             ],
           ),
-        ),
-    );
+        );
   }
 }
 
