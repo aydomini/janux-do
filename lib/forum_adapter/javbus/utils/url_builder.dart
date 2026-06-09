@@ -48,17 +48,11 @@ class JavBusUrlBuilder {
 
   /// 构造 Discuz UC 头像 URL
   ///
-  /// 格式: {scheme}://uc.{host}/uc/data/avatar/{uid_9digits}/{uid}_avatar_middle.jpg
-  /// 示例: uid=133191 → 000/13/31/91_avatar_middle.jpg
+  /// 使用 uc_server/avatar.php 动态生成头像，与站点 HTML 中的格式一致。
+  /// 格式: {baseUrl}uc_server/avatar.php?uid={uid}&size=middle
   String? buildAvatarUrl(int? authorId) {
     if (authorId == null) return null;
-    final padded = authorId.toString().padLeft(9, '0');
-    final dir = '${padded.substring(0, 3)}'
-        '/${padded.substring(3, 6)}'
-        '/${padded.substring(6, 9)}';
-    final host = baseUri.host.replaceFirst('www.', '');
-    return '${baseUri.scheme}://uc.$host'
-        '/uc/data/avatar/$dir/${authorId}_avatar_middle.jpg';
+    return resolve('uc_server/avatar.php?uid=$authorId&size=middle');
   }
 
   static bool _looksLikeHostUrl(String value) {
