@@ -367,7 +367,7 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
 }
 
 class _PostCard extends StatelessWidget {
-  _PostCard({
+  const _PostCard({
     super.key,
     required this.post,
     required this.displayFloorNumber,
