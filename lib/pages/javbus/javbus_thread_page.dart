@@ -114,6 +114,7 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
   void _onScroll() {
     final position = _scrollController.position;
     _cache.scrollOffset = position.pixels;
+    _recordPostHeights();
     if (position.extentAfter > 600) return;
     _loadNextPage();
   }
@@ -240,12 +241,46 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
   /// 帖子 ID → GlobalKey 映射，用于引用跳转精确定位
   final Map<int, GlobalKey> _postKeys = {};
 
+  /// 已渲染帖子的实际高度（postId → 像素高度），用于精确估算滚动偏移
+  final Map<int, double> _postHeights = {};
+
+  /// 未测量帖子的估算高度（基于已测帖子的平均值）
+  double get _estimatedPostHeight {
+    if (_postHeights.isEmpty) return 250;
+    final sum = _postHeights.values.fold<double>(0, (a, b) => a + b);
+    return sum / _postHeights.length;
+  }
+
+  /// 记录当前视口内所有帖子的实际渲染高度
+  void _recordPostHeights() {
+    for (final entry in _postKeys.entries) {
+      final ctx = entry.value.currentContext;
+      if (ctx == null) continue;
+      final renderBox = ctx.findRenderObject() as RenderBox?;
+      if (renderBox != null && renderBox.hasSize) {
+        _postHeights[entry.key] = renderBox.size.height;
+      }
+    }
+  }
+
+  /// 基于实测高度估算目标索引帖子的滚动偏移
+  double _estimatePostOffset(int targetIndex) {
+    // ListView padding 顶部
+    double offset = JavBusLayout.threadPadding.top;
+    for (int i = 0; i < targetIndex && i < _posts.length; i++) {
+      final postId = _posts[i].postId;
+      offset += _postHeights[postId] ?? _estimatedPostHeight;
+      offset += 28; // 分隔线高度
+    }
+    return offset;
+  }
+
   /// 在帖子列表中查找 pid 对应楼层并滚动到位
   ///
   /// 两阶段定位策略：
   /// 1. 快速路径：目标在视口内 → GlobalKey 精确跳转
-  /// 2. 慢速路径：目标已被 ListView 回收（离屏）→ 按索引比例估算偏移
-  ///    animateTo 将目标拉入视口 → Widget 重建后 ensureVisible 精确修正
+  /// 2. 慢速路径：目标离屏 → 实测高度累加计算精确偏移 → animateTo
+  ///    滚动到位 → ensureVisible 像素级微调
   Future<void> _scrollToPost(int pid) async {
     final key = _postKeys[pid];
 
@@ -261,17 +296,22 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
       return;
     }
 
-    // 慢速路径：目标已离屏，先用数据驱动估算位置滚过去，再精确修正
+    // 慢速路径：目标已离屏，用实测高度累加定位
     final targetIndex = _posts.indexWhere((p) => p.postId == pid);
     if (targetIndex == -1) return;
     if (_posts.isEmpty || !_scrollController.hasClients) return;
 
-    final position = _scrollController.position;
+    // 先记录当前可见帖子的高度，刷新估算数据
+    _recordPostHeights();
+
     final estimatedOffset =
-        targetIndex / _posts.length * position.maxScrollExtent;
+        _estimatePostOffset(targetIndex).clamp(
+          0.0,
+          _scrollController.position.maxScrollExtent,
+        );
 
     await _scrollController.animateTo(
-      estimatedOffset.clamp(0.0, position.maxScrollExtent),
+      estimatedOffset,
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeInOut,
     );
