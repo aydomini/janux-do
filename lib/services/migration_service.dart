@@ -1,0 +1,146 @@
+import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../constants.dart';
+import 'network/cookie/cookie_jar_service.dart';
+
+/// 迁移项定义
+class Migration {
+  const Migration({
+    required this.key,
+    required this.name,
+    required this.shouldRun,
+    required this.run,
+  });
+
+  /// SharedPreferences 标记键
+  final String key;
+
+  /// 迁移名称（日志用）
+  final String name;
+
+  /// 前置检查：返回 true 才真正执行
+  /// 全新安装时应返回 false（没有旧数据需要迁移）
+  final Future<bool> Function(SharedPreferences prefs) shouldRun;
+
+  /// 执行迁移
+  final Future<void> Function() run;
+}
+
+/// 统一迁移服务
+/// 新增迁移只需在 [_migrations] 列表末尾追加一条即可。
+class MigrationService {
+  MigrationService._();
+
+  /// 本次启动是否需要重新登录（供 UI 弹 Dialog 用）
+  static bool requiresRelogin = false;
+
+  /// 按顺序执行的迁移列表
+  static final _migrations = <Migration>[
+    // v2: enhanced_cookie_jar 切换 — 清空旧 cookie 存储，要求重新登录
+    Migration(
+      key: 'cookie_clean_slate_v2',
+      name: 'Cookie clean slate',
+      shouldRun: (prefs) async {
+        // 旧迁移标记存在 → 老用户
+        if (prefs.getBool('cookie_domain_migration_v2') == true) return true;
+        // 兜底：CookieJar 中有登录 token
+        try {
+          final jar = CookieJarService();
+          if (!jar.isInitialized) await jar.initialize();
+          final token = await jar.getTToken();
+          return token != null && token.isNotEmpty;
+        } catch (_) {
+          return false;
+        }
+      },
+      run: () async {
+        final jar = CookieJarService();
+        if (!jar.isInitialized) await jar.initialize();
+        await jar.clearAll();
+        requiresRelogin = true;
+      },
+    ),
+    // v3: 浏览器优先双通道切换 — 对存量用户执行一次全量 Cookie 清理，避免旧污染状态残留
+    Migration(
+      key: 'cookie_clean_slate_v3',
+      name: 'Cookie clean slate v3',
+      shouldRun: (prefs) async {
+        if (_hasLegacyCookieMigrationMarker(prefs)) return true;
+        try {
+          final jar = CookieJarService();
+          if (!jar.isInitialized) await jar.initialize();
+          final token = await jar.getTToken();
+          final cfClearance = await jar.getCfClearance();
+          return (token != null && token.isNotEmpty) ||
+              (cfClearance != null && cfClearance.isNotEmpty) ||
+              prefs.getString('linux_do_username')?.isNotEmpty == true;
+        } catch (_) {
+          return prefs.getString('linux_do_username')?.isNotEmpty == true;
+        }
+      },
+      run: () async {
+        final jar = CookieJarService();
+        if (!jar.isInitialized) await jar.initialize();
+        await jar.clearAll();
+        requiresRelogin = true;
+      },
+    ),
+    // v4: storageKey 放宽（去掉 hostOnly）— 清理旧 cookie 防止多副本残留
+    // 只要不是全新安装就清除（游客也可能有残留重复 cookie）
+    Migration(
+      key: 'cookie_relaxed_key_v4',
+      name: 'Relaxed storageKey migration',
+      shouldRun: (prefs) async {
+        // 有任何旧迁移标记 = 非全新安装
+        if (_hasLegacyCookieMigrationMarker(prefs)) return true;
+        // jar 中有 cookie = 非全新安装
+        try {
+          final jar = CookieJarService();
+          if (!jar.isInitialized) await jar.initialize();
+          final cookies = await jar.cookieJar.loadForRequest(
+            Uri.parse(AppConstants.baseUrl),
+          );
+          return cookies.isNotEmpty;
+        } catch (_) {
+          return false;
+        }
+      },
+      run: () async {
+        final jar = CookieJarService();
+        if (!jar.isInitialized) await jar.initialize();
+        await jar.clearAll();
+        requiresRelogin = true;
+      },
+    ),
+  ];
+
+  static bool _hasLegacyCookieMigrationMarker(SharedPreferences prefs) {
+    return prefs.getBool('cookie_clean_slate_v2') == true ||
+        prefs.getBool('cookie_domain_migration_v2') == true;
+  }
+
+  /// 在 main() 中调用，在所有网络服务启动之前执行
+  static Future<void> runAll(SharedPreferences prefs) async {
+    requiresRelogin = false;
+
+    for (final m in _migrations) {
+      if (prefs.getBool(m.key) == true) continue;
+
+      if (!await m.shouldRun(prefs)) {
+        await prefs.setBool(m.key, true);
+        debugPrint('[Migration] 跳过（无需迁移）: ${m.name}');
+        continue;
+      }
+
+      debugPrint('[Migration] 开始: ${m.name}');
+      try {
+        await m.run();
+        await prefs.setBool(m.key, true);
+        debugPrint('[Migration] 完成: ${m.name}');
+      } catch (e) {
+        debugPrint('[Migration] 失败: ${m.name}, $e');
+      }
+    }
+  }
+}

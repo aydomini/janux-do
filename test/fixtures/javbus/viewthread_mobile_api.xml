@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <Variables>
+    <thread>
+      <subject>移动 API 主题</subject>
+    </thread>
+    <ppp>5</ppp>
+    <page>1</page>
+    <totalpage>3</totalpage>
+    <postlist>
+      <post>
+        <pid>1201</pid>
+        <tid>1010</tid>
+        <number>1</number>
+        <author>API 楼主</author>
+        <authorid>601</authorid>
+        <dateline>2026-6-8 14:00</dateline>
+        <message><![CDATA[<p>API 第一楼正文</p><img src="static/image/common/none.gif" file="data/attachment/forum/api-cover.jpg" /><a href="forum.php?mod=attachment&amp;aid=api-aid">API附件.rar</a>]]></message>
+      </post>
+      <post>
+        <pid>1202</pid>
+        <tid>1010</tid>
+        <number>2</number>
+        <author>API 回复者</author>
+        <authorid>602</authorid>
+        <dateline>2026-6-8 14:30</dateline>
+        <message><![CDATA[<p>API 回复正文</p>]]></message>
+      </post>
+    </postlist>
+  </Variables>
+</root>

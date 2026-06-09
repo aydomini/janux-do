@@ -1,0 +1,471 @@
+import 'package:html/dom.dart';
+import 'package:html/parser.dart' as html_parser;
+
+import '../../../forum_adapter/exceptions.dart';
+import '../../../forum_adapter/models/forum_attachment.dart';
+import '../../../forum_adapter/models/forum_post.dart';
+import '../../../forum_adapter/models/forum_results.dart';
+import '../utils/time_parser.dart';
+import '../utils/url_builder.dart';
+import 'post_html_cleaner.dart';
+
+class ViewThreadParser {
+  ViewThreadParser({
+    this.urlBuilder = const JavBusUrlBuilder(),
+    DiscuzTimeParser? timeParser,
+    this.htmlCleaner = const PostHtmlCleaner(),
+  }) : timeParser = timeParser ?? DiscuzTimeParser();
+
+  final JavBusUrlBuilder urlBuilder;
+  final DiscuzTimeParser timeParser;
+  final PostHtmlCleaner htmlCleaner;
+
+  PostListResult parse(
+    String html, {
+    required int threadId,
+    String? requestUrl,
+  }) {
+    final document = html_parser.parse(html);
+    final apiResult = _parseMobileApiResult(
+      document,
+      rawHtml: html,
+      threadId: threadId,
+    );
+    if (apiResult != null) return apiResult;
+
+    final posts = <ForumPost>[];
+    var floorFallback = 1;
+
+    for (final scope in _postScopes(document)) {
+      final postId = _extractPostId(scope.anchor);
+      if (postId == null) continue;
+      final container = scope.container;
+      final author = _authorElement(container);
+      final message = _messageElement(container, postId: postId);
+      final rawContentHtml = message?.innerHtml ?? '';
+      final contentHtml = htmlCleaner.clean(rawContentHtml);
+      posts.add(
+        ForumPost(
+          postId: postId,
+          threadId: threadId,
+          floorNumber: _extractFloor(container) ?? floorFallback,
+          author: author?.text.trim() ?? '',
+          authorId: _extractQueryInt(author?.attributes['href'] ?? '', 'uid'),
+          createdAt: timeParser.parse(_timeText(container)),
+          avatarUrl: _extractAvatarUrl(container, urlBuilder),
+          contentHtml: contentHtml,
+          attachments: _extractAttachments(message),
+          isThreadAuthor: posts.isEmpty,
+        ),
+      );
+      floorFallback++;
+    }
+
+    if (posts.isEmpty && !_isKnownEmptyPage(document)) {
+      throw ForumParseException(
+        '未找到 Discuz 楼层',
+        parserName: 'ViewThreadParser',
+        requestUrl: requestUrl,
+        responseSnippet: _snippet(html),
+      );
+    }
+    if (posts.isNotEmpty &&
+        posts.every((post) => post.contentHtml.trim().isEmpty) &&
+        !_isKnownEmptyPage(document)) {
+      throw ForumParseException(
+        '未解析到任何帖子正文',
+        parserName: 'ViewThreadParser',
+        requestUrl: requestUrl,
+        responseSnippet: _snippet(html),
+      );
+    }
+
+    final pagination = _extractPagination(document);
+    return PostListResult(
+      posts: posts,
+      currentPage: pagination.currentPage,
+      totalPages: pagination.totalPages,
+      hasNextPage: pagination.hasNextPage,
+      threadTitle: _extractTitle(document),
+    );
+  }
+
+  static String _extractTitle(Document document) {
+    final title =
+        document.querySelector('#thread_subject')?.text.trim() ??
+        document.querySelector('.threadsubject')?.text.trim() ??
+        document.querySelector('h1')?.text.trim() ??
+        document.querySelector('title')?.text.trim();
+    return title ?? '';
+  }
+
+  PostListResult? _parseMobileApiResult(
+    Document document, {
+    required String rawHtml,
+    required int threadId,
+  }) {
+    final postElements = document.querySelectorAll('postlist > post, post');
+    if (postElements.isEmpty) return null;
+    final rawMessages = _extractRawMobileApiMessages(rawHtml);
+    final posts = <ForumPost>[];
+    var floorFallback = 1;
+
+    // 从 <thread> 元素提取楼主的 authorId，跨页可靠
+    final threadElement = document.querySelector('thread');
+    final threadAuthorId = threadElement != null
+        ? _childInt(threadElement, 'authorid')
+        : null;
+
+    for (var index = 0; index < postElements.length; index++) {
+      final postElement = postElements[index];
+      final postId = _childInt(postElement, 'pid');
+      if (postId == null) continue;
+      final authorId = _childInt(postElement, 'authorid');
+      final message = index < rawMessages.length
+          ? rawMessages[index]
+          : _childText(postElement, 'message');
+      final contentHtml = htmlCleaner.clean(message);
+      posts.add(
+        ForumPost(
+          postId: postId,
+          threadId: _childInt(postElement, 'tid') ?? threadId,
+          floorNumber: _childInt(postElement, 'number') ?? floorFallback,
+          author: _childText(postElement, 'author').trim(),
+          authorId: authorId,
+          createdAt: timeParser.parse(_childText(postElement, 'dateline')),
+          avatarUrl: _extractMobileApiAvatarUrl(postElement, urlBuilder)
+              ?? urlBuilder.buildAvatarUrl(authorId),
+          contentHtml: contentHtml,
+          attachments: _extractAttachmentsFromHtml(message),
+          isThreadAuthor:
+              threadAuthorId != null && authorId == threadAuthorId,
+        ),
+      );
+      floorFallback++;
+    }
+
+    if (posts.isEmpty) return null;
+    return PostListResult(
+      posts: posts,
+      currentPage: _documentInt(document, 'page') ?? 1,
+      totalPages: _documentInt(document, 'totalpage') ?? 1,
+      hasNextPage:
+          (_documentInt(document, 'page') ?? 1) <
+          (_documentInt(document, 'totalpage') ?? 1),
+      threadTitle:
+          document.querySelector('thread > subject')?.text.trim() ??
+          document.querySelector('subject')?.text.trim() ??
+          '',
+    );
+  }
+
+  static int? _extractPostId(Element element) {
+    final id = element.id;
+    final match = RegExp(r'^(?:pid_?|post_)(\d+)$').firstMatch(id);
+    return match == null ? null : int.parse(match.group(1)!);
+  }
+
+  static int? _extractFloor(Element element) {
+    for (final marker in element.querySelectorAll('em')) {
+      final next = marker.nextElementSibling;
+      if (next?.localName == 'sup' && next?.text.trim() == '#') {
+        final floor = int.tryParse(marker.text.trim());
+        if (floor != null) return floor;
+      }
+    }
+    final text =
+        element.querySelector('.floor')?.text.trim() ??
+        element.querySelector('em.xg1')?.text.trim() ??
+        '';
+    final match = RegExp(r'(\d+)').firstMatch(text);
+    return match == null ? null : int.parse(match.group(1)!);
+  }
+
+  static List<_PostScope> _postScopes(Document document) {
+    final seenIds = <String>{};
+    final scopes = <_PostScope>[];
+    for (final element in document.querySelectorAll('[id]')) {
+      final postId = _extractPostId(element);
+      if (postId == null) continue;
+      if (!seenIds.add('$postId')) continue;
+      scopes.add(
+        _PostScope(anchor: element, container: _postContainer(element)),
+      );
+    }
+    return scopes;
+  }
+
+  static Element _postContainer(Element anchor) {
+    if (_hasPostContent(anchor)) return anchor;
+    final sibling = _nextPostSibling(anchor);
+    if (sibling != null) return _mergeElements(anchor, sibling);
+    final ancestor = _closestPostAncestor(anchor);
+    if (ancestor != null && _hasPostContent(ancestor)) return ancestor;
+    final ancestorSibling = ancestor == null
+        ? null
+        : _nextPostSibling(ancestor);
+    if (ancestor != null && ancestorSibling != null) {
+      return _mergeElements(ancestor, ancestorSibling);
+    }
+    return ancestor ?? anchor;
+  }
+
+  static Element? _closestPostAncestor(Element element) {
+    Element? current = element.parent;
+    while (current != null) {
+      if (_looksLikePostContainer(current)) return current;
+      current = current.parent;
+    }
+    return null;
+  }
+
+  static Element? _nextPostSibling(Element element) {
+    final parent = element.parent;
+    if (parent == null) return null;
+    final nodes = parent.nodes;
+    final start = nodes.indexOf(element);
+    if (start == -1) return null;
+    final siblings = <Element>[];
+    for (var index = start + 1; index < nodes.length; index++) {
+      final node = nodes[index];
+      if (node is! Element) continue;
+      if (_extractPostId(node) != null) break;
+      if (_isPaginationElement(node)) break;
+      if (_looksLikePostContainer(node) || siblings.isNotEmpty) {
+        siblings.add(node);
+      }
+    }
+    if (siblings.isEmpty) return null;
+    if (siblings.length == 1) return siblings.single;
+    return html_parser
+        .parseFragment(
+          '<div>${siblings.map((element) => element.outerHtml).join()}</div>',
+        )
+        .children
+        .first;
+  }
+
+  static Element _mergeElements(Element first, Element second) {
+    return html_parser
+        .parseFragment('<div>${first.outerHtml}${second.outerHtml}</div>')
+        .children
+        .first;
+  }
+
+  static bool _hasPostContent(Element element) {
+    return _messageElement(element, postId: _extractPostId(element) ?? -1) !=
+        null;
+  }
+
+  static bool _looksLikePostContainer(Element element) {
+    return element.querySelector('.authi a[href]') != null ||
+        element.querySelector('.author[href]') != null ||
+        element.querySelector('.bm_user a[href]') != null ||
+        element.querySelector('a[href*="uid="]') != null ||
+        element.querySelector('a[href*="home.php?mod=space"]') != null ||
+        element.querySelector('.message') != null ||
+        element.querySelector('.mes') != null ||
+        element.querySelector('.postmessage') != null ||
+        element.querySelector('[id^="postmessage_"]') != null ||
+        element.querySelector('.t_f') != null ||
+        element.querySelector('.pcb') != null ||
+        element.querySelector('.plc') != null ||
+        element.querySelector('.pbody') != null ||
+        element.querySelector('.post_msg') != null ||
+        element.querySelector('.post_body') != null ||
+        element.classes.contains('bm_c') ||
+        element.classes.contains('pbody') ||
+        element.classes.contains('mes') ||
+        element.classes.contains('postmessage') ||
+        element.classes.contains('post_head') ||
+        element.classes.contains('post_msg') ||
+        element.classes.contains('post_body');
+  }
+
+  static Element? _authorElement(Element postElement) {
+    return postElement.querySelector('.author[href]') ??
+        postElement.querySelector('.authi a[href]') ??
+        postElement.querySelector('.bm_user a[href*="home.php?mod=space"]') ??
+        postElement.querySelector('.bm_user a[href*="uid="]') ??
+        postElement.querySelector('a[href*="uid="]') ??
+        postElement.querySelector('a[href*="home.php?mod=space"]');
+  }
+
+  static Element? _messageElement(Element postElement, {required int postId}) {
+    return postElement.querySelector('#postmessage_$postId') ??
+        postElement.querySelector('.postmessage[id^="postmessage_"]') ??
+        postElement.querySelector('.t_f[id^="postmessage_"]') ??
+        postElement.querySelector('.t_f') ??
+        postElement.querySelector('.message') ??
+        postElement.querySelector('.mes') ??
+        postElement.querySelector('.post_msg') ??
+        postElement.querySelector('.post_body') ??
+        postElement.querySelector('.pcb') ??
+        postElement.querySelector('.t_fsz') ??
+        postElement.querySelector('.plc .pct') ??
+        postElement.querySelector('.plc');
+  }
+
+  static String _timeText(Element postElement) {
+    return postElement.querySelector('.time')?.text.trim() ??
+        postElement.querySelector('.authi em')?.text.trim() ??
+        postElement.querySelector('[id^="authorposton"]')?.text.trim() ??
+        postElement.querySelector('.bm_user em')?.text.trim() ??
+        postElement.querySelector('em')?.text.trim() ??
+        '';
+  }
+
+  static String? _extractAvatarUrl(
+    Element postElement,
+    JavBusUrlBuilder builder,
+  ) {
+    final image =
+        postElement.querySelector('.avatar img[src]') ??
+        postElement.querySelector('.avtm img[src]') ??
+        postElement.querySelector('.pls img[src*="avatar"]') ??
+        postElement.querySelector('img[src*="avatar.php"]') ??
+        postElement.querySelector('img[src*="/avatar/"]');
+    final src = image?.attributes['src']?.trim();
+    if (src == null || src.isEmpty) return null;
+    return builder.resolve(src);
+  }
+
+  static String? _extractMobileApiAvatarUrl(
+    Element postElement,
+    JavBusUrlBuilder builder,
+  ) {
+    final avatar = _firstNonEmptyText(postElement, [
+      'avatar',
+      'avatarurl',
+      'icon',
+    ]);
+    final value = avatar?.trim();
+    if (value == null || value.isEmpty) return null;
+    return builder.resolve(value);
+  }
+
+  static String? _firstNonEmptyText(Element element, List<String> selectors) {
+    for (final selector in selectors) {
+      final text = _childText(element, selector).trim();
+      if (text.isNotEmpty) return text;
+    }
+    return null;
+  }
+
+  List<ForumAttachment> _extractAttachments(Element? message) {
+    if (message == null) return const [];
+    return _extractAttachmentsFromHtml(message.innerHtml);
+  }
+
+  List<ForumAttachment> _extractAttachmentsFromHtml(String html) {
+    final message = html_parser.parseFragment(html);
+    final attachments = <ForumAttachment>[];
+    final seenUrls = <String>{};
+    for (final link in message.querySelectorAll('a[href]')) {
+      final href = link.attributes['href']?.trim();
+      if (href == null || href.isEmpty) continue;
+      final normalizedHref = href.replaceAll('&amp;', '&');
+      final uri = Uri.tryParse(normalizedHref);
+      final isAttachment =
+          uri?.queryParameters['mod'] == 'attachment' ||
+          uri?.queryParameters.containsKey('aid') == true;
+      if (!isAttachment) continue;
+      final url = urlBuilder.resolve(normalizedHref);
+      if (!seenUrls.add(url)) continue;
+      attachments.add(
+        ForumAttachment(
+          attachmentId: uri?.queryParameters['aid'],
+          fileName: link.text.trim().isEmpty ? '附件' : link.text.trim(),
+          url: url,
+        ),
+      );
+    }
+    return attachments;
+  }
+}
+
+typedef _Pagination = ({int currentPage, int totalPages, bool hasNextPage});
+
+_Pagination _extractPagination(Document document) {
+  final current =
+      int.tryParse(document.querySelector('.pg strong')?.text.trim() ?? '') ??
+      1;
+  var total = current;
+  for (final link in document.querySelectorAll('.pg a')) {
+    final page = int.tryParse(
+      RegExp(r'(\d+)').firstMatch(link.text.trim())?.group(1) ?? '',
+    );
+    if (page != null && page > total) total = page;
+  }
+  for (final element in document.querySelectorAll('.pg [title]')) {
+    final page = int.tryParse(
+      RegExp(
+            r'共\s*(\d+)\s*頁',
+          ).firstMatch(element.attributes['title'] ?? '')?.group(1) ??
+          '',
+    );
+    if (page != null && page > total) total = page;
+  }
+  return (
+    currentPage: current,
+    totalPages: total,
+    hasNextPage: document.querySelector('.pg .nxt') != null,
+  );
+}
+
+int? _extractQueryInt(String href, String key) {
+  final uri = Uri.tryParse(href.replaceAll('&amp;', '&'));
+  final value =
+      uri?.queryParameters[key] ??
+      RegExp('(?:[?&]|&amp;)$key=(\\d+)').firstMatch(href)?.group(1);
+  return value == null ? null : int.tryParse(value);
+}
+
+String _childText(Element element, String selector) {
+  return element.querySelector(selector)?.text.trim() ?? '';
+}
+
+int? _childInt(Element element, String selector) {
+  return int.tryParse(_childText(element, selector));
+}
+
+int? _documentInt(Document document, String selector) {
+  return int.tryParse(document.querySelector(selector)?.text.trim() ?? '');
+}
+
+List<String> _extractRawMobileApiMessages(String html) {
+  final messages = <String>[];
+  final pattern = RegExp(
+    r'<message\b[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</message>',
+    caseSensitive: false,
+    dotAll: true,
+  );
+  for (final match in pattern.allMatches(html)) {
+    messages.add(match.group(1)?.trim() ?? '');
+  }
+  return messages;
+}
+
+bool _isKnownEmptyPage(Document document) {
+  final text = document.body?.text ?? document.text ?? '';
+  return text.contains('暂无') || text.contains('没有权限') || text.contains('抱歉');
+}
+
+String _snippet(String text, {int maxLength = 300}) {
+  final normalized = text.replaceAll(RegExp(r'\s+'), ' ').trim();
+  if (normalized.length <= maxLength) return normalized;
+  return normalized.substring(0, maxLength);
+}
+
+bool _isPaginationElement(Element element) {
+  return element.classes.contains('pg') ||
+      element.classes.contains('page') ||
+      element.querySelector('.pg') != null;
+}
+
+class _PostScope {
+  const _PostScope({required this.anchor, required this.container});
+
+  final Element anchor;
+  final Element container;
+}

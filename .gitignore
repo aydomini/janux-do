@@ -1,0 +1,62 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+**/__pycache__/
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+
+# IDE
+*.iml
+*.ipr
+*.iws
+.idea/
+.vscode/
+
+# Flutter/Dart
+**/doc/api/
+.dart_tool/
+.flutter-plugins-dependencies
+flutter_*.log
+.pub-cache/
+.pub/
+build/
+/dist/
+/coverage/
+app.*.symbols
+app.*.map.json
+
+# Melos workspace
+.melos_tool/
+packages/*/pubspec.lock
+
+# FVM
+.fvm/
+
+# Generated CA certificates (build-time)
+assets/certs/proxy_ca.pem
+
+# L10n generated
+lib/l10n/slang/
+lib/l10n/generated/app_localizations_compat.g.dart
+
+# Desktop native runtime artifacts
+windows/runner/native/*
+!windows/runner/native/.keep
+linux/runner/native/*
+!linux/runner/native/.keep
+macos/Runner/native/*
+!macos/Runner/native/.keep
+
+# Personal CLAUDE.md (private instructions)
+CLAUDE.md
+
+# Local dev tool
+tool/verify_javbus_thread.dart
+.claude/

@@ -1,0 +1,274 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+
+import '../../constants.dart';
+import '../../l10n/s.dart';
+import 'log_writer.dart';
+
+/// 日志文件管理工具
+class LoggerUtils {
+  LoggerUtils._();
+
+  /// 过期天数
+  static const int _expireDays = 14;
+
+  /// 获取日志文件
+  static Future<File> getLogFile() => LogWriter.getLogFile();
+
+  /// 生成带设备/APP 头信息的分享文件，返回临时文件路径
+  static Future<String> getShareFilePath() async {
+    final header = await _buildShareHeader();
+    final logFile = await getLogFile();
+    final logContent =
+        logFile.existsSync() ? await logFile.readAsString() : '';
+
+    final dir = logFile.parent;
+    final shareFile = File('${dir.path}/app_log_share.jsonl');
+    await shareFile.writeAsString('$header$logContent');
+    return shareFile.path;
+  }
+
+  /// 获取人类可读的设备和应用信息文本（用于复制）
+  static Future<String> getDeviceInfoText() async {
+    final buf = StringBuffer();
+
+    try {
+      final pkg = await PackageInfo.fromPlatform();
+      buf.writeln('应用: ${pkg.appName}');
+      buf.writeln('版本: ${pkg.version} (${pkg.buildNumber})');
+      buf.writeln('包名: ${pkg.packageName}');
+    } catch (_) {}
+
+    try {
+      final deviceInfo = DeviceInfoPlugin();
+      if (Platform.isAndroid) {
+        final info = await deviceInfo.androidInfo;
+        buf.writeln('平台: Android ${info.version.release} (SDK ${info.version.sdkInt})');
+        buf.writeln('设备: ${info.brand} ${info.model}');
+      } else if (Platform.isIOS) {
+        final info = await deviceInfo.iosInfo;
+        buf.writeln('平台: iOS ${info.systemVersion}');
+        buf.writeln('设备: ${info.utsname.machine}');
+      } else if (Platform.isMacOS) {
+        final info = await deviceInfo.macOsInfo;
+        buf.writeln('平台: macOS ${info.majorVersion}.${info.minorVersion}.${info.patchVersion}');
+        buf.writeln('设备: ${info.model} (${info.arch})');
+      } else if (Platform.isLinux) {
+        final info = await deviceInfo.linuxInfo;
+        buf.writeln('平台: ${info.prettyName}');
+      } else if (Platform.isWindows) {
+        final info = await deviceInfo.windowsInfo;
+        buf.writeln('平台: Windows (${info.buildNumber})');
+        buf.writeln('设备: ${info.computerName}');
+      }
+    } catch (_) {}
+
+    // WebView 版本
+    final webViewVersion = _parseWebViewVersion();
+    if (webViewVersion != null) {
+      buf.writeln('WebView: $webViewVersion');
+    }
+
+    // 网络配置信息
+    final networkConfig = _getNetworkConfigLines();
+    for (final line in networkConfig) {
+      buf.writeln(line);
+    }
+
+    return buf.toString().trimRight();
+  }
+
+  /// 构建分享文件头部的设备和应用信息（JSONL 格式）
+  static Future<String> _buildShareHeader() async {
+    final buf = StringBuffer();
+
+    try {
+      final pkg = await PackageInfo.fromPlatform();
+      buf.writeln(jsonEncode({
+        '_header': 'app_info',
+        'appName': pkg.appName,
+        'version': pkg.version,
+        'buildNumber': pkg.buildNumber,
+        'packageName': pkg.packageName,
+      }));
+    } catch (_) {}
+
+    try {
+      final deviceInfo = DeviceInfoPlugin();
+      Map<String, dynamic> device;
+      if (Platform.isAndroid) {
+        final info = await deviceInfo.androidInfo;
+        device = {
+          '_header': 'device_info',
+          'platform': 'Android',
+          'brand': info.brand,
+          'model': info.model,
+          'sdkInt': info.version.sdkInt,
+          'release': info.version.release,
+        };
+      } else if (Platform.isIOS) {
+        final info = await deviceInfo.iosInfo;
+        device = {
+          '_header': 'device_info',
+          'platform': 'iOS',
+          'model': info.utsname.machine,
+          'systemVersion': info.systemVersion,
+        };
+      } else if (Platform.isMacOS) {
+        final info = await deviceInfo.macOsInfo;
+        device = {
+          '_header': 'device_info',
+          'platform': 'macOS',
+          'model': info.model,
+          'osVersion':
+              '${info.majorVersion}.${info.minorVersion}.${info.patchVersion}',
+          'arch': info.arch,
+        };
+      } else if (Platform.isLinux) {
+        final info = await deviceInfo.linuxInfo;
+        device = {
+          '_header': 'device_info',
+          'platform': 'Linux',
+          'prettyName': info.prettyName,
+        };
+      } else if (Platform.isWindows) {
+        final info = await deviceInfo.windowsInfo;
+        device = {
+          '_header': 'device_info',
+          'platform': 'Windows',
+          'computerName': info.computerName,
+          'buildNumber': info.buildNumber,
+        };
+      } else {
+        device = {'_header': 'device_info', 'platform': Platform.operatingSystem};
+      }
+
+      // User-Agent
+      device['userAgent'] = AppConstants.userAgent;
+
+      // WebView 版本
+      final webViewVersion = _parseWebViewVersion();
+      if (webViewVersion != null) {
+        device['webViewVersion'] = webViewVersion;
+      }
+
+      // 网络配置信息
+      device.addAll(_getNetworkConfigMap());
+
+      buf.writeln(jsonEncode(device));
+    } catch (_) {}
+
+    return buf.toString();
+  }
+
+  /// 从缓存的 User-Agent 中解析 WebView/浏览器引擎版本
+  static String? _parseWebViewVersion() {
+    final ua = AppConstants.userAgent;
+    // Chrome/xxx.x.x.x（Android WebView 和桌面端）
+    final chromeMatch = RegExp(r'Chrome/([\d.]+)').firstMatch(ua);
+    if (chromeMatch != null) return 'Chrome/${chromeMatch.group(1)}';
+    // Safari/xxx（iOS WKWebView）
+    final safariMatch = RegExp(r'Version/([\d.]+).*Safari').firstMatch(ua);
+    if (safariMatch != null) return 'Safari/${safariMatch.group(1)}';
+    return null;
+  }
+
+  /// 获取网络配置的可读文本行（用于复制设备信息）
+  static List<String> _getNetworkConfigLines() {
+    final lines = <String>[];
+    lines.add('适配器: 原生');
+    return lines;
+  }
+
+  static Map<String, dynamic> _getNetworkConfigMap() {
+    final map = <String, dynamic>{};
+    map['adapter'] = '原生';
+    return map;
+  }
+
+  /// 读取并解析 JSONL，逆序返回（最新在前）
+  /// 对旧格式条目（无 level/type 字段）默认当作 error + general
+  static Future<List<Map<String, dynamic>>> readLogEntries() async {
+    final file = await getLogFile();
+    if (!file.existsSync()) return [];
+
+    final content = await file.readAsString();
+    if (content.trim().isEmpty) return [];
+
+    final lines = content.trim().split('\n');
+    final entries = <Map<String, dynamic>>[];
+
+    for (final line in lines) {
+      if (line.trim().isEmpty) continue;
+      try {
+        final json = jsonDecode(line) as Map<String, dynamic>;
+        // 兼容旧格式
+        json['level'] ??= 'error';
+        json['type'] ??= 'general';
+        // 旧格式的 message 在 customParameters.message 中
+        if (json['message'] == null) {
+          final customParams =
+              json['customParameters'] as Map<String, dynamic>?;
+          json['message'] = customParams?['message']?.toString() ??
+              json['error']?.toString();
+          // 同时提升 tag
+          json['tag'] ??= customParams?['tag']?.toString();
+        }
+        entries.add(json);
+      } catch (_) {
+        // 跳过无法解析的行
+      }
+    }
+
+    return entries.reversed.toList();
+  }
+
+  /// 读取原始文本（用于复制/分享）
+  static Future<String> readLogContent() async {
+    final file = await getLogFile();
+    if (!file.existsSync()) return '';
+    return file.readAsString();
+  }
+
+  /// 清理 14 天前的过期条目
+  static Future<void> cleanExpiredLogs() async {
+    final file = await getLogFile();
+    if (!file.existsSync()) return;
+
+    final content = await file.readAsString();
+    if (content.trim().isEmpty) return;
+
+    final lines = content.trim().split('\n');
+    final now = DateTime.now();
+    final retained = <String>[];
+
+    for (final line in lines) {
+      if (line.trim().isEmpty) continue;
+      try {
+        final json = jsonDecode(line) as Map<String, dynamic>;
+        final timestamp = json['timestamp'] as String?;
+        if (timestamp != null) {
+          final time = DateTime.tryParse(timestamp);
+          if (time != null && now.difference(time).inDays < _expireDays) {
+            retained.add(line);
+          }
+        }
+      } catch (_) {
+        // 无法解析的行也丢弃
+      }
+    }
+
+    await file.writeAsString('${retained.join('\n')}\n');
+  }
+
+  /// 清空日志
+  static Future<void> clearLogs() async {
+    final file = await getLogFile();
+    if (file.existsSync()) {
+      await file.writeAsString('');
+    }
+  }
+}

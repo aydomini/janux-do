@@ -1,0 +1,294 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../providers/preferences_provider.dart';
+import 'blur_config.dart';
+
+/// 根据用户偏好判断是否启用模糊
+bool _isBlurEnabled(BuildContext context) {
+  final container = ProviderScope.containerOf(context, listen: false);
+  final prefs = container.read(preferencesProvider);
+  return prefs.dialogBlur;
+}
+
+/// 构建带动画模糊效果的遮罩层
+Widget _buildAnimatedBlurBarrier({
+  required Widget barrier,
+  required Animation<double> animation,
+}) {
+  return AnimatedBuilder(
+    animation: animation,
+    builder: (context, child) {
+      final t = animation.value;
+      if (t == 0) return child!;
+
+      final sigma = (blurSigma * t).clamp(0.01, blurSigma);
+      final filter = createBlurFilter(sigma);
+
+      return BackdropFilter(filter: filter, child: child);
+    },
+    child: barrier,
+  );
+}
+
+/// 替代 [showDialog]，自动根据用户偏好添加背景高斯模糊。
+Future<T?> showAppDialog<T>({
+  required BuildContext context,
+  required WidgetBuilder builder,
+  bool barrierDismissible = true,
+  Color? barrierColor,
+  String? barrierLabel,
+  bool useRootNavigator = true,
+  RouteSettings? routeSettings,
+  bool blur = true,
+  Duration transitionDuration = const Duration(milliseconds: 150),
+}) {
+  final enableBlur = blur && _isBlurEnabled(context);
+  final navigator = Navigator.of(context, rootNavigator: useRootNavigator);
+
+  final themes = InheritedTheme.capture(from: context, to: navigator.context);
+
+  final route = _BlurRawDialogRoute<T>(
+    pageBuilder: (buildContext, animation, secondaryAnimation) {
+      final Widget pageChild = Builder(builder: builder);
+      return themes.wrap(SafeArea(child: pageChild));
+    },
+    barrierDismissible: barrierDismissible,
+    barrierColor:
+        barrierColor ??
+        (enableBlur
+            ? blurBarrierColor(Theme.of(context).brightness)
+            : Colors.black54),
+    barrierLabel:
+        barrierLabel ??
+        MaterialLocalizations.of(context).modalBarrierDismissLabel,
+    transitionDuration: transitionDuration,
+    transitionBuilder: _buildMaterialDialogTransitions,
+    settings: routeSettings,
+    enableBlur: enableBlur,
+  );
+
+  return navigator.push(route);
+}
+
+/// 替代 [showGeneralDialog]，自动根据用户偏好添加背景高斯模糊。
+Future<T?> showAppGeneralDialog<T extends Object?>({
+  required BuildContext context,
+  required RoutePageBuilder pageBuilder,
+  bool barrierDismissible = false,
+  String? barrierLabel,
+  Color? barrierColor,
+  Duration transitionDuration = const Duration(milliseconds: 200),
+  RouteTransitionsBuilder? transitionBuilder,
+  bool useRootNavigator = true,
+  RouteSettings? routeSettings,
+  bool blur = true,
+}) {
+  final enableBlur = blur && _isBlurEnabled(context);
+  final navigator = Navigator.of(context, rootNavigator: useRootNavigator);
+  final route = _BlurRawDialogRoute<T>(
+    pageBuilder: pageBuilder,
+    barrierDismissible: barrierDismissible,
+    barrierLabel: barrierLabel,
+    barrierColor:
+        barrierColor ??
+        (enableBlur
+            ? blurBarrierColor(Theme.of(context).brightness)
+            : const Color(0x80000000)),
+    transitionDuration: transitionDuration,
+    transitionBuilder: transitionBuilder,
+    settings: routeSettings,
+    enableBlur: enableBlur,
+  );
+
+  return navigator.push(route);
+}
+
+Future<T?> pushAppRoute<T>({
+  required BuildContext context,
+  required Route<T> route,
+  bool useRootNavigator = true,
+}) {
+  final navigator = Navigator.of(context, rootNavigator: useRootNavigator);
+  return navigator.push(route);
+}
+
+/// Material Design 标准对话框过渡动画
+Widget _buildMaterialDialogTransitions(
+  BuildContext context,
+  Animation<double> animation,
+  Animation<double> secondaryAnimation,
+  Widget child,
+) {
+  return FadeTransition(
+    opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut),
+    child: child,
+  );
+}
+
+/// 替代 [showModalBottomSheet]，自动根据用户偏好添加背景高斯模糊。
+Future<T?> showAppBottomSheet<T>({
+  required BuildContext context,
+  required WidgetBuilder builder,
+  Color? backgroundColor,
+  String? barrierLabel,
+  double? elevation,
+  ShapeBorder? shape,
+  Clip? clipBehavior,
+  BoxConstraints? constraints,
+  Color? barrierColor,
+  bool isScrollControlled = false,
+  bool useRootNavigator = false,
+  bool isDismissible = true,
+  bool enableDrag = true,
+  bool? showDragHandle,
+  bool useSafeArea = false,
+  RouteSettings? routeSettings,
+  AnimationController? transitionAnimationController,
+  Offset? anchorPoint,
+  AnimationStyle? sheetAnimationStyle,
+  bool blur = true,
+}) {
+  final enableBlur = blur && _isBlurEnabled(context);
+  final NavigatorState navigator = Navigator.of(
+    context,
+    rootNavigator: useRootNavigator,
+  );
+
+  final route = _BlurModalBottomSheetRoute<T>(
+    builder: builder,
+    capturedThemes: InheritedTheme.capture(
+      from: context,
+      to: navigator.context,
+    ),
+    isScrollControlled: isScrollControlled,
+    barrierLabel:
+        barrierLabel ??
+        MaterialLocalizations.of(context).modalBarrierDismissLabel,
+    modalBarrierColor:
+        barrierColor ??
+        (enableBlur
+            ? blurBarrierColor(Theme.of(context).brightness)
+            : Theme.of(context).bottomSheetTheme.modalBarrierColor),
+    isDismissible: isDismissible,
+    enableDrag: enableDrag,
+    showDragHandle: showDragHandle,
+    backgroundColor: backgroundColor,
+    elevation: elevation,
+    shape: shape,
+    clipBehavior: clipBehavior,
+    constraints: constraints,
+    settings: routeSettings,
+    transitionAnimationController: transitionAnimationController,
+    anchorPoint: anchorPoint,
+    useSafeArea: useSafeArea,
+    sheetAnimationStyle: sheetAnimationStyle,
+    enableBlur: enableBlur,
+  );
+
+  return navigator.push(route);
+}
+
+/// 支持动画模糊的 ModalBottomSheetRoute 子类
+class _BlurModalBottomSheetRoute<T> extends ModalBottomSheetRoute<T> {
+  final bool enableBlur;
+
+  _BlurModalBottomSheetRoute({
+    required super.builder,
+    super.capturedThemes,
+    super.barrierLabel,
+    super.backgroundColor,
+    super.elevation,
+    super.shape,
+    super.clipBehavior,
+    super.constraints,
+    super.modalBarrierColor,
+    super.isDismissible,
+    super.enableDrag,
+    super.showDragHandle,
+    required super.isScrollControlled,
+    super.settings,
+    super.transitionAnimationController,
+    super.anchorPoint,
+    super.useSafeArea,
+    super.sheetAnimationStyle,
+    this.enableBlur = false,
+  });
+
+  @override
+  Widget buildModalBarrier() {
+    final barrier = super.buildModalBarrier();
+    if (!enableBlur) return barrier;
+    return _buildAnimatedBlurBarrier(barrier: barrier, animation: animation!);
+  }
+}
+
+/// 支持动画模糊的 RawDialogRoute 替代
+class _BlurRawDialogRoute<T> extends PopupRoute<T> {
+  final RoutePageBuilder pageBuilder;
+  final bool _barrierDismissible;
+  final String? _barrierLabel;
+  final Color _barrierColor;
+  final Duration _transitionDuration;
+  final RouteTransitionsBuilder? _transitionBuilder;
+  final bool enableBlur;
+
+  _BlurRawDialogRoute({
+    required this.pageBuilder,
+    required bool barrierDismissible,
+    String? barrierLabel,
+    required Color barrierColor,
+    required Duration transitionDuration,
+    RouteTransitionsBuilder? transitionBuilder,
+    super.settings,
+    this.enableBlur = false,
+  }) : _barrierDismissible = barrierDismissible,
+       _barrierLabel = barrierLabel,
+       _barrierColor = barrierColor,
+       _transitionDuration = transitionDuration,
+       _transitionBuilder = transitionBuilder;
+
+  @override
+  bool get barrierDismissible => _barrierDismissible;
+
+  @override
+  String? get barrierLabel => _barrierLabel;
+
+  @override
+  Color get barrierColor => _barrierColor;
+
+  @override
+  Duration get transitionDuration => _transitionDuration;
+
+  @override
+  Widget buildPage(
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+  ) {
+    return pageBuilder(context, animation, secondaryAnimation);
+  }
+
+  @override
+  Widget buildTransitions(
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    if (_transitionBuilder != null) {
+      return _transitionBuilder(context, animation, secondaryAnimation, child);
+    }
+    return FadeTransition(
+      opacity: CurvedAnimation(parent: animation, curve: Curves.linear),
+      child: child,
+    );
+  }
+
+  @override
+  Widget buildModalBarrier() {
+    final barrier = super.buildModalBarrier();
+    if (!enableBlur) return barrier;
+    return _buildAnimatedBlurBarrier(barrier: barrier, animation: animation!);
+  }
+}
