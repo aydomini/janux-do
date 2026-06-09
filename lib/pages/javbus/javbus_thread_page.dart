@@ -242,9 +242,10 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
     final key = _postKeys[pid];
 
     // 快速路径：目标在当前 Widget 树中，直接精确跳转
-    if (key?.currentContext != null) {
+    final fastCtx = key?.currentContext;
+    if (fastCtx != null) {
       Scrollable.ensureVisible(
-        key!.currentContext!,
+        fastCtx,
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeInOut,
         alignment: 0.1,
@@ -269,10 +270,10 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
         )
         .then((_) {
           if (!mounted) return;
-          final key = _postKeys[pid];
-          if (key?.currentContext != null) {
+          final slowCtx = _postKeys[pid]?.currentContext;
+          if (slowCtx != null) {
             Scrollable.ensureVisible(
-              key.currentContext!,
+              slowCtx,
               duration: const Duration(milliseconds: 200),
               curve: Curves.easeInOut,
               alignment: 0.1,
