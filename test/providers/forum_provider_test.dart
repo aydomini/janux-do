@@ -53,6 +53,7 @@ class _FakeForumAdapter extends ForumAdapter {
     required int forumId,
     int? filterTypeId,
     int page = 1,
+    SortMode? sort,
   }) async {
     await _throwIfNeeded();
     return ThreadListResult(

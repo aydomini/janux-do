@@ -16,6 +16,7 @@ class _UnsupportedAdapter extends ForumAdapter {
     required int forumId,
     int? filterTypeId,
     int page = 1,
+    SortMode? sort,
   }) async {
     return const ThreadListResult(
       threads: [],

@@ -79,6 +79,7 @@ class _FakeForumAdapter extends ForumAdapter {
     required int forumId,
     int? filterTypeId,
     int page = 1,
+    SortMode? sort,
   }) async {
     final error = threadsError;
     if (error != null) {

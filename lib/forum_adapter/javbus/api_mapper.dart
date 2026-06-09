@@ -1,4 +1,4 @@
-import '../../adapter.dart';
+import '../adapter.dart';
 import 'utils/url_builder.dart';
 
 class JavBusApiMapper {
@@ -76,6 +76,7 @@ class JavBusApiMapper {
       'tid': '$tid',
       'pid': '$pid',
       'page': '$page',
+      // ignore: use_null_aware_elements
       if (formhash != null) 'formhash': formhash,
     });
   }
