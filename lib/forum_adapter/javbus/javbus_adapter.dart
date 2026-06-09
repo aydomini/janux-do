@@ -68,6 +68,7 @@ class JavbusAdapter extends ForumAdapter {
       referer: siteHomeUri.toString(),
       browserNavigation: true,
     );
+    JavBusUrlBuilder.detectUcHostFromHtml(html);
     return _forumIndexParser.parse(html, requestUrl: forumHomeUri.toString());
   }
 

@@ -46,12 +46,39 @@ class JavBusUrlBuilder {
     return path;
   }
 
+  /// UC 头像域名（从桌面版页面 HTML 中自动检测）
+  static String? _detectedUcHost;
+
+  /// 从 HTML 中检测 UC 头像域名
+  ///
+  /// 桌面版页面中包含形如 `https://uc.xxx.com/uc/data/avatar/...` 的 img 标签，
+  /// 调用此方法提取 UC 域名供 [buildAvatarUrl] 使用。
+  static void detectUcHostFromHtml(String html) {
+    final match = RegExp(
+      r'https?://(uc\.[^/"]+)/uc/data/avatar/',
+    ).firstMatch(html);
+    if (match != null) {
+      _detectedUcHost = match.group(1);
+    }
+  }
+
   /// 构造 Discuz UC 头像 URL
   ///
-  /// 使用 uc_server/avatar.php 动态生成头像，与站点 HTML 中的格式一致。
-  /// 格式: {baseUrl}uc_server/avatar.php?uid={uid}&size=middle
+  /// 优先使用从 HTML 中检测到的 UC 数据目录格式:
+  ///   https://uc.{host}/uc/data/avatar/000/50/64/57_avatar_middle.jpg
+  /// 未检测到 UC 域名时回退到 PHP 脚本格式:
+  ///   {baseUrl}uc_server/avatar.php?uid={uid}&size=middle
   String? buildAvatarUrl(int? authorId) {
     if (authorId == null) return null;
+    final ucHost = _detectedUcHost;
+    if (ucHost != null) {
+      final padded = authorId.toString().padLeft(9, '0');
+      final dir = '${padded.substring(0, 3)}'
+          '/${padded.substring(3, 5)}'
+          '/${padded.substring(5, 7)}';
+      final file = '${padded.substring(7, 9)}_avatar_middle.jpg';
+      return 'https://$ucHost/uc/data/avatar/$dir/$file';
+    }
     return resolve('uc_server/avatar.php?uid=$authorId&size=middle');
   }
 
