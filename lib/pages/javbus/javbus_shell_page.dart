@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:jovial_svg/jovial_svg.dart';
 
 import '../../forum_adapter/models/forum_forum.dart';
+import '../../forum_adapter/models/forum_results.dart';
 import '../../forum_adapter/models/forum_thread.dart';
 import '../../providers/forum_provider.dart';
 
@@ -656,6 +657,8 @@ class _ThreadListPaneState extends ConsumerState<_ThreadListPane> {
                             return _ThreadRow(
                               thread: thread,
                               onTap: () => widget.onSelectThread(thread),
+                              views: _viewCounts[thread.threadId] ??
+                                  thread.views,
                             );
                           },
                         ),
@@ -773,10 +776,15 @@ class _ThreadTableHeader extends StatelessWidget {
 }
 
 class _ThreadRow extends StatelessWidget {
-  const _ThreadRow({required this.thread, required this.onTap});
+  const _ThreadRow({
+    required this.thread,
+    required this.onTap,
+    this.views = 0,
+  });
 
   final ForumThread thread;
   final VoidCallback onTap;
+  final int views;
 
   @override
   Widget build(BuildContext context) {
@@ -835,7 +843,7 @@ class _ThreadRow extends StatelessWidget {
             SizedBox(
               width: JavBusLayout.topicViewsColumnWidth,
               child: Text(
-                _formatCount(_viewCounts[thread.threadId] ?? thread.views),
+                _formatCount(views),
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,

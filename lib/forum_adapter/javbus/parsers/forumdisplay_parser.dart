@@ -193,6 +193,7 @@ int? _extractQueryInt(String href, String key) {
     }
     return results;
   }
+}
 
 bool _isKnownEmptyPage(Document document) {
   final text = document.body?.text ?? document.text ?? '';

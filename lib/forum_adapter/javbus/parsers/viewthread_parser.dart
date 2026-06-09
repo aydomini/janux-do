@@ -477,7 +477,6 @@ bool _isPaginationElement(Element element) {
     final document = html_parser.parse(html);
     final results = <int, List<ForumComment>>{};
 
-    // 匹配每个 pstl 块：作者信息在 .psta，正文和时间在 .psti
     final pstlBlocks = document.querySelectorAll('.pstl');
     for (final block in pstlBlocks) {
       final pid = _findParentPid(block);
@@ -488,16 +487,15 @@ bool _isPaginationElement(Element element) {
 
       final authorLink = psta?.querySelector('a[href*="uid="]');
       final authorName = authorLink?.text.trim() ?? '';
-      final authorId = _extractQueryInt(authorLink?.attributes['href'] ?? '');
+      final authorId =
+          _extractQueryInt(authorLink?.attributes['href'] ?? '', 'uid');
       final avatarImg = psta?.querySelector('img[src]');
       final avatarUrl = avatarImg?.attributes['src']?.trim();
 
-      // 提取正文：移除 .xg1 时间标签后的纯文本
       final timeSpan = psti?.querySelector('.xg1');
       timeSpan?.remove();
       final content = psti?.text.trim() ?? '';
 
-      // 提取时间
       DateTime? createdAt;
       if (timeSpan != null) {
         final timeText = timeSpan.text.trim();
@@ -529,7 +527,6 @@ bool _isPaginationElement(Element element) {
   static int? _findParentPid(Element element) {
     Element? current = element.parent;
     while (current != null) {
-      // 查找兄弟或祖先元素中的帖子 ID 标记
       final idAttr =
           current.attributes['id'] ??
           current.querySelector('[id^="pid"]')?.attributes['id'];
@@ -539,7 +536,6 @@ bool _isPaginationElement(Element element) {
           return int.tryParse(pidMatch.group(1)!);
         }
       }
-      // 检查当前元素内部是否有 pid 链接
       final pidLink = current.querySelector('a[id^="pid"]');
       if (pidLink != null) {
         final href = pidLink.attributes['id'] ?? '';
@@ -552,6 +548,7 @@ bool _isPaginationElement(Element element) {
     }
     return null;
   }
+}
 
 class _PostScope {
   const _PostScope({required this.anchor, required this.container});
