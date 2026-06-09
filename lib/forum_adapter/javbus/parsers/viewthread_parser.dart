@@ -456,22 +456,29 @@ class ViewThreadParser {
 
   /// 从 viewthread 桌面版 HTML 中提取点评分页信息
   /// 返回 `Map<pid, 总页数>`，仅包含有超过 1 页的帖子
-  /// 解析来自 .pgs .pg 分页条中的 commentmore URL
+  /// .pgs 分页条是 comment_XXX 的兄弟节点，不在其内部
   static Map<int, int> parseCommentPagination(String html) {
     final document = html_parser.parse(html);
     final results = <int, int>{};
-    // 查找每个 comment_XXXXXX 容器下的分页条
     for (final cmBlock in document.querySelectorAll('[id^="comment_"]')) {
       final pidMatch = RegExp(r'^comment_(\d+)$').firstMatch(
         cmBlock.attributes['id'] ?? '',
       );
       if (pidMatch == null) continue;
       final pid = int.parse(pidMatch.group(1)!);
-      // 解析分页条中所有页码链接，取最大值
-      var maxPage = 1;
-      final pgBar = cmBlock.querySelector('.pgs .pg');
+      // .pgs 可能在 comment_XXX 内部（浏览器解析后），也可能在其外部兄弟节点
+      Element? pgBar = cmBlock.querySelector('.pgs');
+      if (pgBar == null) {
+        pgBar = cmBlock.nextElementSibling;
+        while (pgBar != null && !pgBar.classes.contains('pgs')) {
+          pgBar = pgBar.nextElementSibling;
+        }
+      }
       if (pgBar == null) continue;
-      for (final link in pgBar.querySelectorAll('a')) {
+      final pg = pgBar.querySelector('.pg');
+      if (pg == null) continue;
+      var maxPage = 1;
+      for (final link in pg.querySelectorAll('a')) {
         final onclick = link.attributes['onclick'] ?? '';
         final pageMatch = RegExp(r'[&?]page=(\d+)').firstMatch(onclick);
         if (pageMatch != null) {

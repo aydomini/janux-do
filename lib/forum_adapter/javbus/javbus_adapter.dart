@@ -226,10 +226,11 @@ class JavbusAdapter extends ForumAdapter {
       final allComments = ViewThreadParser.parseComments(html);
       // 检查哪些帖子有更多点评页
       final pagination = ViewThreadParser.parseCommentPagination(html);
-      // 逐帖逐页抓取点评，模拟真人翻页间隔
+      // 逐帖逐页抓取点评，动态检测是否还有下一页
       for (final entry in pagination.entries) {
         final pid = entry.key;
-        for (var cp = 2; cp <= entry.value; cp++) {
+        var maxPage = entry.value;
+        for (var cp = 2; cp <= maxPage; cp++) {
           await Future.delayed(
             Duration(milliseconds: 150 + Random().nextInt(250)),
           );
@@ -251,6 +252,13 @@ class JavbusAdapter extends ForumAdapter {
             );
             for (final mc in moreComments.entries) {
               allComments.putIfAbsent(mc.key, () => []).addAll(mc.value);
+            }
+            // 检查 commentmore 返回是否还有更多页
+            final morePagination =
+                ViewThreadParser.parseCommentPagination(moreHtml);
+            final nextMax = morePagination[pid];
+            if (nextMax != null && nextMax > maxPage) {
+              maxPage = nextMax;
             }
           } on DioException {
             // 单页失败不影响其他页

@@ -1276,25 +1276,13 @@ class _CommentSectionState extends State<_CommentSection> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  comment.author,
-                                  style: baseStyle?.copyWith(
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                              ),
-                              if (comment.createdAt != null)
-                                Text(
-                                  _formatCommentTime(comment.createdAt!),
-                                  style: baseStyle?.copyWith(
-                                    color: theme.colorScheme.onSurfaceVariant.
-                                        withValues(alpha: 0.72),
-                                  ),
-                                ),
-                            ],
+                          Text(
+                            comment.author,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: baseStyle?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
                           SelectionArea(
                             child: Text(
@@ -1305,6 +1293,20 @@ class _CommentSectionState extends State<_CommentSection> {
                         ],
                       ),
                     ),
+                    if (comment.createdAt != null) ...[
+                      const SizedBox(width: 12),
+                      SizedBox(
+                        width: 150,
+                        child: Text(
+                          _formatCommentTime(comment.createdAt!),
+                          textAlign: TextAlign.right,
+                          style: baseStyle?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant
+                                .withValues(alpha: 0.72),
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               )),

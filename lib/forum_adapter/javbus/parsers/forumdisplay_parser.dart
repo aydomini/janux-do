@@ -114,17 +114,36 @@ class ForumDisplayParser {
   }
 
   /// 从桌面版 HTML 解析浏览量（tid → views）
+  /// 同时支持 .thread/.stats 格式和 normalthread_XXX/.views 格式
   static Map<int, int> parseThreadViews(String html) {
     final document = html_parser.parse(html);
     final results = <int, int>{};
-    for (final row in document.querySelectorAll('[id^="normalthread_"]')) {
-      final rawId = row.id;
-      final tid = int.tryParse(rawId.replaceFirst('normalthread_', ''));
+    for (final row in document.querySelectorAll('.thread, [id^="normalthread_"]')) {
+      final rawId = row.attributes['id'];
+      final int? tid;
+      if (rawId != null && rawId.startsWith('normalthread_')) {
+        // 标准 Discuz 格式：id="normalthread_12345"
+        tid = int.tryParse(rawId.replaceFirst('normalthread_', ''));
+      } else {
+        // JavBus 格式：.thread 内 a[href*="tid="]
+        final link = row.querySelector('a[href*="tid="]');
+        tid = link == null
+            ? null
+            : _extractQueryInt(link.attributes['href'] ?? '', 'tid');
+      }
       if (tid == null) continue;
-      final viewsElement = row.querySelector('.views');
-      final viewsText = viewsElement?.text.trim() ?? '';
-      final views = int.tryParse(viewsText);
-      if (views != null) results[tid] = views;
+      // 从 .views 或 .stats 中提取浏览量
+      final viewsElement =
+          row.querySelector('.views') ?? row.querySelector('.stats');
+      if (viewsElement != null) {
+        final viewsText = viewsElement.text.trim();
+        // "回复 2 / 查看 30" → 提取查看数量
+        final viewsMatch = RegExp(r'查看\s*(\d+)').firstMatch(viewsText);
+        final views = viewsMatch != null
+            ? int.tryParse(viewsMatch.group(1)!)
+            : int.tryParse(viewsText);
+        if (views != null) results[tid] = views;
+      }
     }
     return results;
   }
