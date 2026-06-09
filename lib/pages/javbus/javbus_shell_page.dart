@@ -437,6 +437,8 @@ class _ThreadListPaneState extends ConsumerState<_ThreadListPane> {
   bool _isLoadingMore = false;
   Object? _error;
   StackTrace? _stackTrace;
+  final Map<int, int> _viewCounts = {};
+
   @override
   void initState() {
     super.initState();
@@ -485,6 +487,9 @@ class _ThreadListPaneState extends ConsumerState<_ThreadListPane> {
     _threads
       ..clear()
       ..addAll(widget.cache.threads);
+    _viewCounts
+      ..clear()
+      ..addAll(widget.cache.viewCounts);
     _currentPage = widget.cache.currentPage;
     _totalPages = widget.cache.totalPages;
     _hasNextPage = widget.cache.hasNextPage;
@@ -508,6 +513,9 @@ class _ThreadListPaneState extends ConsumerState<_ThreadListPane> {
     widget.cache.threads
       ..clear()
       ..addAll(_threads);
+    widget.cache.viewCounts
+      ..clear()
+      ..addAll(_viewCounts);
     widget.cache
       ..currentPage = _currentPage
       ..totalPages = _totalPages
@@ -526,15 +534,24 @@ class _ThreadListPaneState extends ConsumerState<_ThreadListPane> {
       _stackTrace = null;
     });
     try {
-      final result = await ref.read(forumAdapterProvider).getThreads(
-        forumId: widget.forum.forumId,
-        filterTypeId: widget.forum.filterTypeId,
-      );
+      final adapter = ref.read(forumAdapterProvider);
+      final results = await Future.wait([
+        adapter.getThreads(
+          forumId: widget.forum.forumId,
+          filterTypeId: widget.forum.filterTypeId,
+        ),
+        adapter.getThreadViewCounts(widget.forum.forumId),
+      ]);
       if (!mounted) return;
+      final result = results[0] as ThreadListResult;
+      final views = results[1] as Map<int, int>;
       setState(() {
         _threads
           ..clear()
           ..addAll(result.threads);
+        _viewCounts
+          ..clear()
+          ..addAll(views);
         _currentPage = result.currentPage;
         _totalPages = result.totalPages;
         _hasNextPage = result.hasNextPage;
@@ -557,14 +574,21 @@ class _ThreadListPaneState extends ConsumerState<_ThreadListPane> {
     final requestedPage = _currentPage + 1;
     setState(() => _isLoadingMore = true);
     try {
-      final result = await ref.read(forumAdapterProvider).getThreads(
-        forumId: widget.forum.forumId,
-        filterTypeId: widget.forum.filterTypeId,
-        page: requestedPage,
-      );
+      final adapter = ref.read(forumAdapterProvider);
+      final results = await Future.wait([
+        adapter.getThreads(
+          forumId: widget.forum.forumId,
+          filterTypeId: widget.forum.filterTypeId,
+          page: requestedPage,
+        ),
+        adapter.getThreadViewCounts(widget.forum.forumId, page: requestedPage),
+      ]);
       if (!mounted) return;
+      final result = results[0] as ThreadListResult;
+      final views = results[1] as Map<int, int>;
       setState(() {
         _threads.addAll(result.threads);
+        _viewCounts.addAll(views);
         _currentPage = result.currentPage < requestedPage
             ? requestedPage
             : result.currentPage;
@@ -632,7 +656,7 @@ class _ThreadListPaneState extends ConsumerState<_ThreadListPane> {
                             return _ThreadRow(
                               thread: thread,
                               onTap: () => widget.onSelectThread(thread),
-                              views: thread.views,
+                              views: _viewCounts[thread.threadId] ?? thread.views,
                             );
                           },
                         ),
@@ -648,6 +672,7 @@ class _ThreadListPaneState extends ConsumerState<_ThreadListPane> {
 
 class _ThreadListPaneCache {
   final List<ForumThread> threads = [];
+  final Map<int, int> viewCounts = {};
   int currentPage = 1;
   int totalPages = 1;
   bool hasNextPage = true;

@@ -146,25 +146,42 @@ class JavbusAdapter extends ForumAdapter {
     int? filterTypeId,
     int page = 1,
   }) async {
-    // 使用桌面版 URL，一次请求即可获取主题列表和完整浏览量
-    // 桌面版 HTML 包含"回复 X / 查看 Y"格式，parse() 直接提取 views
-    final uri = _apiMapper.desktopForumDisplay(
+    final uri = _apiMapper.forumDisplay(
       fid: forumId,
       filterTypeId: filterTypeId,
       page: page,
     );
     final html = await _getHtml(
       uri,
-      userAgent: desktopUserAgent,
+      userAgent: mobileUserAgent,
       referer: _lastDesktopReferer,
-      browserNavigation: true,
     );
-    _lastDesktopReferer = uri.toString();
     return _forumDisplayParser.parse(
       html,
       forumId: forumId,
       requestUrl: uri.toString(),
     );
+  }
+
+  @override
+  Future<Map<int, int>> getThreadViewCounts(int forumId, {int page = 1}) async {
+    final uri = _apiMapper.desktopForumDisplay(
+      fid: forumId,
+      page: page,
+    );
+    try {
+      final html = await _getHtml(
+        uri,
+        userAgent: desktopUserAgent,
+        referer: _lastDesktopReferer,
+        browserNavigation: true,
+      );
+      return ForumDisplayParser.parseThreadViews(html);
+    } on DioException {
+      return {};
+    } on ForumException {
+      return {};
+    }
   }
 
   @override
