@@ -37,7 +37,7 @@ class ImageHeaderService {
     return {
       'User-Agent': _userAgent,
       'Referer': _referer,
-      if (_cookieHeader != null) 'Cookie': _cookieHeader!,
+      'Cookie': ?_cookieHeader,
     };
   }
 }
