@@ -1309,7 +1309,7 @@ class _CommentAvatar extends StatelessWidget {
         width: size,
         height: size,
         fit: BoxFit.cover,
-        errorWidget: (_, __, ___) => Icon(
+        errorWidget: (_, _, _) => Icon(
           Icons.person_outline_rounded,
           size: size,
           color: theme.colorScheme.onSurfaceVariant,
