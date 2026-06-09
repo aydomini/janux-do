@@ -5,8 +5,7 @@ import 'package:jovial_svg/jovial_svg.dart';
 import '../../forum_adapter/models/forum_forum.dart';
 import '../../forum_adapter/models/forum_thread.dart';
 import '../../providers/forum_provider.dart';
-import '../../l10n/s.dart';
-import '../../utils/time_utils.dart';
+
 import '../../widgets/common/error_view.dart';
 import '../../widgets/topic/topic_list_skeleton.dart';
 import 'javbus_layout.dart';
@@ -819,16 +818,13 @@ class _ThreadRow extends StatelessWidget {
             const SizedBox(width: 24),
             SizedBox(
               width: JavBusLayout.topicTimeColumnWidth,
-              child: Tooltip(
-                message: TimeUtils.formatDetailTime(thread.createdAt),
-                waitDuration: const Duration(milliseconds: 600),
-                child: Text(
-                  _formatRelativeTime(context, thread.createdAt),
-                  textAlign: TextAlign.right,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w600,
-                  ),
+              child: Text(
+                _formatThreadTime(thread.createdAt),
+                textAlign: TextAlign.right,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                  height: 1.35,
                 ),
               ),
             ),
@@ -1038,18 +1034,10 @@ String _forumSubtitle(ForumForum forum) {
   return forum.description?.trim() ?? '';
 }
 
-String _formatRelativeTime(BuildContext context, DateTime? time) {
-  if (time == null) return '';
-  final now = DateTime.now();
-  final diff = now.difference(time);
-  final l10n = context.l10n;
-
-  if (diff.inSeconds < 60) return l10n.time_justNow;
-  if (diff.inMinutes < 60) return l10n.time_minutesAgo(diff.inMinutes);
-  if (diff.inHours < 24) return l10n.time_hoursAgo(diff.inHours);
-  if (diff.inDays < 7) return l10n.time_daysAgo(diff.inDays);
-  if (diff.inDays < 30) return l10n.time_weeksAgo((diff.inDays / 7).floor());
-  if (diff.inDays < 365) return l10n.time_monthsAgo((diff.inDays / 30).floor());
-  return l10n.time_yearsAgo((diff.inDays / 365).floor());
+String _formatThreadTime(DateTime? value) {
+  if (value == null) return '';
+  String two(int input) => input.toString().padLeft(2, '0');
+  return '${value.year}-${two(value.month)}-${two(value.day)}\n'
+      '${two(value.hour)}:${two(value.minute)}';
 }
 

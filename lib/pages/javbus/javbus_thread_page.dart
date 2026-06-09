@@ -567,6 +567,9 @@ Map<String, String>? _buildJavBusHtmlStyles(
   if (localName == 'li') {
     return {'margin': '4px 0'};
   }
+  if (localName == 'font') {
+    return {'font-size': 'inherit'};
+  }
   if (localName == 'code' && element.parent?.localName != 'pre') {
     return {
       'font-family':

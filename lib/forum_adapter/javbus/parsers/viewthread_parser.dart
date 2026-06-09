@@ -35,6 +35,7 @@ class ViewThreadParser {
 
     final posts = <ForumPost>[];
     var floorFallback = 1;
+    int? threadAuthorId;
 
     for (final scope in _postScopes(document)) {
       final postId = _extractPostId(scope.anchor);
@@ -44,18 +45,26 @@ class ViewThreadParser {
       final message = _messageElement(container, postId: postId);
       final rawContentHtml = message?.innerHtml ?? '';
       final contentHtml = htmlCleaner.clean(rawContentHtml);
+      final authorId = _extractQueryInt(author?.attributes['href'] ?? '', 'uid');
+      final floorNumber = _extractFloor(container) ?? floorFallback;
+      // 第一页的 #1 楼始终是楼主；后续页面通过 authorId 对比兜底
+      if (threadAuthorId == null && floorNumber == 1) {
+        threadAuthorId = authorId;
+      }
       posts.add(
         ForumPost(
           postId: postId,
           threadId: threadId,
-          floorNumber: _extractFloor(container) ?? floorFallback,
+          floorNumber: floorNumber,
           author: author?.text.trim() ?? '',
-          authorId: _extractQueryInt(author?.attributes['href'] ?? '', 'uid'),
+          authorId: authorId,
           createdAt: timeParser.parse(_timeText(container)),
-          avatarUrl: _extractAvatarUrl(container, urlBuilder),
+          avatarUrl: _extractAvatarUrl(container, urlBuilder)
+              ?? urlBuilder.buildAvatarUrl(authorId),
           contentHtml: contentHtml,
           attachments: _extractAttachments(message),
-          isThreadAuthor: posts.isEmpty,
+          isThreadAuthor:
+              authorId != null && authorId == threadAuthorId,
         ),
       );
       floorFallback++;

@@ -217,7 +217,7 @@ void main() {
     expect(find.text('日本AV'), findsOneWidget);
     expect(find.textContaining('120 主题'), findsOneWidget);
     expect(find.text('普通主题 P1'), findsOneWidget);
-    expect(find.textContaining('前'), findsOneWidget);
+    expect(find.textContaining('2026-06-08'), findsOneWidget);
     expect(find.text('话题'), findsOneWidget);
     expect(find.text('回复'), findsOneWidget);
     expect(find.text('时间'), findsOneWidget);
