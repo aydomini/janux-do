@@ -234,6 +234,8 @@ class JavbusAdapter extends ForumAdapter {
       browserNavigation: true,
     );
     _lastDesktopReferer = uri.toString();
+    // 确保 UC 头像域名已从 HTML 中检测（首次直接进入帖子时 _ensureSessionWarm 未调用 detectUcHostFromHtml）
+    JavBusUrlBuilder.detectUcHostFromHtml(html);
     return _viewThreadParser.parse(
       html,
       threadId: threadId,

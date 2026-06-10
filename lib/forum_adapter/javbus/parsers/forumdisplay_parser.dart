@@ -241,7 +241,7 @@ _Author _extractAuthor(Element? container) {
   final authorElement =
       container?.querySelector('.author') ??
       container?.querySelector('.xg1 a[href*="uid="]') ??
-      container?.querySelector('a[href*="home.php?mod=space"]');
+      container?.querySelector('a[href*="home.php?mod=space&"]');
   final name = authorElement?.text.trim() ?? '';
   final id = _extractQueryInt(authorElement?.attributes['href'] ?? '', 'uid');
   return (name: name, id: id);

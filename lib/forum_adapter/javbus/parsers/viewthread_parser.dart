@@ -77,16 +77,18 @@ class ViewThreadParser {
       final contentHtml = htmlCleaner.clean(rawContentHtml);
       final authorId = _extractQueryInt(author?.attributes['href'] ?? '', 'uid');
       final floorNumber = _extractFloor(container) ?? floorFallback;
-      // 第一帖（floorNumber == 1）作者可能来自 .nthread_info（JavBus 自定义主题）
-      var authorName = author?.text.trim() ?? '';
-      if (authorName.isEmpty && floorNumber == 1) {
-        authorName = threadHeaderAuthorName;
-      }
-      // 仅 floorNumber 明确为 1 时用 header 信息补全缺失的 authorId
-      final effectiveAuthorId =
-          authorId ?? (floorNumber == 1 ? threadHeaderAuthorId : null);
+      // 第一帖（floorNumber == 1）作者来自 .nthread_info（JavBus 自定义主题），
+      // .nthread_firstpostbox 容器内不含 .authi，_authorElement 回退可能匹配到正文中的链接。
+      // 因此 floor 1 **始终**优先使用 header 提取信息，不依赖 _authorElement 结果。
+      final isFloorOne = floorNumber == 1;
+      final authorName = isFloorOne && threadHeaderAuthorName.isNotEmpty
+          ? threadHeaderAuthorName
+          : (author?.text.trim() ?? '');
+      final effectiveAuthorId = isFloorOne
+          ? (threadHeaderAuthorId ?? authorId)
+          : authorId;
       // 若 header 未提取到楼主 ID（非 JavBus 主题），第一帖 authorId 作为兜底
-      if (threadAuthorId == null && floorNumber == 1) {
+      if (threadAuthorId == null && isFloorOne) {
         threadAuthorId = effectiveAuthorId ?? authorId;
       }
       posts.add(
@@ -324,9 +326,8 @@ class ViewThreadParser {
   static bool _looksLikePostContainer(Element element) {
     return element.querySelector('.authi a[href]') != null ||
         element.querySelector('.author[href]') != null ||
+        element.querySelector('.post_head a[href]') != null ||
         element.querySelector('.bm_user a[href]') != null ||
-        element.querySelector('a[href*="uid="]') != null ||
-        element.querySelector('a[href*="home.php?mod=space"]') != null ||
         element.querySelector('.message') != null ||
         element.querySelector('.mes') != null ||
         element.querySelector('.postmessage') != null ||
@@ -347,12 +348,17 @@ class ViewThreadParser {
   }
 
   static Element? _authorElement(Element postElement) {
+    // 仅在作者信息区域（.authi / .post_head / .bm_user / .pls）内查找，
+    // 禁止无前缀全容器搜索。回退到 a[href*="uid="] 会匹配到帖子正文中
+    // 的任何用户链接（引用、@提及、收藏按钮等），导致作者名错误。
+    // .post_head 是标准 Discuz XHTML Mobile 主题的作者容器。
     return postElement.querySelector('.author[href]') ??
         postElement.querySelector('.authi a[href]') ??
-        postElement.querySelector('.bm_user a[href*="home.php?mod=space"]') ??
+        postElement.querySelector('.post_head a[href]') ??
         postElement.querySelector('.bm_user a[href*="uid="]') ??
-        postElement.querySelector('a[href*="uid="]') ??
-        postElement.querySelector('a[href*="home.php?mod=space"]');
+        postElement.querySelector('.bm_user a[href*="space&"]') ??
+        postElement.querySelector('.pls a[href*="uid="]') ??
+        postElement.querySelector('.pls a[href*="space&"]');
   }
 
   static Element? _messageElement(Element postElement, {required int postId}) {
@@ -602,10 +608,10 @@ class ViewThreadParser {
     for (final link in uidLinks) {
       if (link.text.trim().isNotEmpty) return link;
     }
-    return psta?.querySelector('a[href*="home.php?mod=space"]') ??
+    return psta?.querySelector('a[href*="space&"]') ??
         psta?.querySelector('a[href]') ??
         block.querySelector('a[href*="uid="]') ??
-        block.querySelector('a[href*="space"]');
+        block.querySelector('a[href*="space&"]');
   }
 
   /// 多级备选查找点评时间元素
