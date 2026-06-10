@@ -393,12 +393,17 @@ class ViewThreadParser {
     Element postElement,
     JavBusUrlBuilder builder,
   ) {
+    // 头像提取限定在作者信息侧边栏（.pls 面板）内，禁止全容器 img 搜索。
+    // 第一帖（nthread_firstpostbox）不包含作者信息区域（.pls/.avtm/.authi
+    // 均在外部 .nthread_info 中），无范围的后备选择器会在全容器包括正文中搜
+    // 索，匹配到帖子正文内包含 "/avatar/" 路径的图片（如引用他人头像），导
+    // 致楼主头像显示为其他用户的头像。
+    final pls = postElement.querySelector('.pls');
     final image =
         postElement.querySelector('.avatar img[src]') ??
         postElement.querySelector('.avtm img[src]') ??
-        postElement.querySelector('.pls img[src*="avatar"]') ??
-        postElement.querySelector('img[src*="avatar.php"]') ??
-        postElement.querySelector('img[src*="/avatar/"]');
+        pls?.querySelector('img[src*="avatar.php"]') ??
+        pls?.querySelector('img[src*="/avatar/"]');
     final src = image?.attributes['src']?.trim();
     if (src == null || src.isEmpty) return null;
     return builder.resolve(src);
