@@ -51,6 +51,7 @@ class PostListResult {
     required this.totalPages,
     required this.hasNextPage,
     required this.threadTitle,
+    this.threadAuthorId,
   });
 
   final List<ForumPost> posts;
@@ -58,4 +59,8 @@ class PostListResult {
   final int totalPages;
   final bool hasNextPage;
   final String threadTitle;
+
+  /// 楼主 (1#) 的 authorId，用于跨页标签匹配。
+  /// 优先从 .nthread_info header 提取，回退到第一帖 authorId。
+  final int? threadAuthorId;
 }

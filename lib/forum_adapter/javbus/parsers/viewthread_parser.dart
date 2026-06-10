@@ -91,6 +91,9 @@ class ViewThreadParser {
       if (threadAuthorId == null && isFloorOne) {
         threadAuthorId = effectiveAuthorId ?? authorId;
       }
+      // isThreadAuthor 简化为纯 ID 比较：楼主 = 1# 的作者 ID。
+      // 只要 threadAuthorId 已确定（来自 header 或第一帖），后续楼层和点评
+      // 只需 authorId == threadAuthorId 即可稳定匹配，无需 floorNumber 特判。
       posts.add(
         ForumPost(
           postId: postId,
@@ -103,9 +106,8 @@ class ViewThreadParser {
               ?? urlBuilder.buildAvatarUrl(effectiveAuthorId),
           contentHtml: contentHtml,
           attachments: _extractAttachments(message),
-          isThreadAuthor: floorNumber == 1 ||
-              (effectiveAuthorId != null &&
-                  effectiveAuthorId == threadAuthorId),
+          isThreadAuthor: effectiveAuthorId != null &&
+              effectiveAuthorId == threadAuthorId,
         ),
       );
       floorFallback++;
@@ -137,6 +139,7 @@ class ViewThreadParser {
       totalPages: pagination.totalPages,
       hasNextPage: pagination.hasNextPage,
       threadTitle: _extractTitle(document),
+      threadAuthorId: threadAuthorId,
     );
   }
 
@@ -206,6 +209,7 @@ class ViewThreadParser {
           document.querySelector('thread > subject')?.text.trim() ??
           document.querySelector('subject')?.text.trim() ??
           '',
+      threadAuthorId: threadAuthorId,
     );
   }
 

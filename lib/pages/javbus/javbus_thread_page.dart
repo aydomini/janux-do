@@ -230,7 +230,7 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
         _posts
           ..clear()
           ..addAll(result.posts);
-        _trackThreadAuthor();
+        _trackThreadAuthor(fromResult: result.threadAuthorId);
         _currentPage = result.currentPage;
         _hasNextPage = result.hasNextPage;
         _isLoadingInitial = false;
@@ -447,11 +447,15 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
     }
   }
 
-  void _trackThreadAuthor() {
+  /// 从解析结果直接获取楼主 ID（解析器已统一提取），无需从帖子列表反推。
+  void _trackThreadAuthor({int? fromResult}) {
+    if (fromResult != null) {
+      _threadAuthorId = fromResult;
+      return;
+    }
     if (_threadAuthorId != null) return;
     for (final post in _posts) {
-      if (post.authorId != null &&
-          (post.floorNumber == 1 || post.isThreadAuthor)) {
+      if (post.authorId != null && post.isThreadAuthor) {
         _threadAuthorId = post.authorId;
         return;
       }
