@@ -407,6 +407,7 @@ class JavbusAdapter extends ForumAdapter {
               'Upgrade-Insecure-Requests': '1',
               'Cache-Control': 'max-age=0',
             },
+            // ignore: use_null_aware_elements
             if (referer != null) 'Referer': referer,
           },
         ),
