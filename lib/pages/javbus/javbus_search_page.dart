@@ -74,9 +74,13 @@ class JavBusSearchPage extends ConsumerStatefulWidget {
   const JavBusSearchPage({
     super.key,
     required this.cache,
+    this.onSelectThread,
   });
 
   final SearchPaneCache cache;
+
+  /// 选中帖子回调（由 shell 提供，在右侧面板内联显示详情而非全屏导航）
+  final ValueChanged<ForumThread>? onSelectThread;
 
   @override
   ConsumerState<JavBusSearchPage> createState() => _JavBusSearchPageState();
@@ -170,6 +174,27 @@ class _JavBusSearchPageState extends ConsumerState<JavBusSearchPage> {
   Future<void> _loadHistory() async {
     _searchHistory = await SearchHistory.load();
     if (mounted) setState(() {});
+  }
+
+  /// 清空搜索结果，回到搜索历史初始状态
+  void _clearSearch() {
+    _searchController.clear();
+    _searchFocus.requestFocus();
+    setState(() {
+      _threads.clear();
+      _currentPage = 1;
+      _totalPages = 1;
+      _totalResults = 0;
+      _hasNextPage = false;
+      _error = null;
+      _lastKeyword = null;
+      _searchId = null;
+    });
+    // 同步清空缓存，避免切换分区后恢复旧结果
+    widget.cache
+      ..hasLoaded = false
+      ..lastKeyword = null
+      ..threads.clear();
   }
 
   void _onScroll() {
@@ -269,14 +294,22 @@ class _JavBusSearchPageState extends ConsumerState<JavBusSearchPage> {
   }
 
   void _openThread(ForumThread thread) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => JavBusThreadPage(
-          threadId: thread.threadId,
-          initialTitle: thread.title,
+    final onSelectThread = widget.onSelectThread;
+    if (onSelectThread != null) {
+      // shell 模式：在右侧面板内联显示详情，保留侧边栏
+      onSelectThread(thread);
+    } else {
+      // 独立页面模式（兼容没有 shell 的场景）
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => JavBusThreadPage(
+            threadId: thread.threadId,
+            initialTitle: thread.title,
+            fullThread: thread,
+          ),
         ),
-      ),
-    );
+      );
+    }
   }
 
   @override
@@ -289,6 +322,7 @@ class _JavBusSearchPageState extends ConsumerState<JavBusSearchPage> {
         _searchHistory.isNotEmpty &&
         _searchController.text.isEmpty &&
         _searchFocus.hasFocus;
+    final isInitial = !showHistory && !hasResults && !showEmpty && !_isSearching;
 
     return Column(
       children: [
@@ -298,9 +332,10 @@ class _JavBusSearchPageState extends ConsumerState<JavBusSearchPage> {
           cooldownSeconds: _cooldownSeconds,
           isSearching: _isSearching,
           onSubmit: () => _doSearch(),
+          onClear: _clearSearch,
         ),
         if (showHistory)
-          _SearchHistoryList(
+          _SearchHistoryDropdown(
             items: _searchHistory,
             onTap: (kw) => _doSearch(keyword: kw),
             onDelete: (kw) async {
@@ -308,8 +343,8 @@ class _JavBusSearchPageState extends ConsumerState<JavBusSearchPage> {
               _searchHistory = await SearchHistory.load();
               if (mounted) setState(() {});
             },
-          )
-        else ...[
+          ),
+        if (!showHistory && !isInitial) ...[
           const Divider(height: 1),
           if (_totalResults > 0)
             _ResultsStats(
@@ -367,6 +402,7 @@ class _JavBusSearchPageState extends ConsumerState<JavBusSearchPage> {
                             : const SizedBox.shrink(),
           ),
         ],
+        if (isInitial) const Expanded(child: SizedBox.shrink()),
       ],
     );
   }
@@ -379,6 +415,7 @@ class _SearchBar extends StatelessWidget {
     required this.cooldownSeconds,
     required this.isSearching,
     required this.onSubmit,
+    required this.onClear,
   });
 
   final TextEditingController controller;
@@ -386,6 +423,7 @@ class _SearchBar extends StatelessWidget {
   final int cooldownSeconds;
   final bool isSearching;
   final VoidCallback onSubmit;
+  final VoidCallback onClear;
 
   @override
   Widget build(BuildContext context) {
@@ -413,7 +451,11 @@ class _SearchBar extends StatelessWidget {
                 suffixIcon: controller.text.isNotEmpty
                     ? IconButton(
                         icon: const Icon(Icons.clear_rounded, size: 18),
-                        onPressed: () => controller.clear(),
+                        tooltip: '清空搜索结果',
+                        onPressed: () {
+                          controller.clear();
+                          onClear();
+                        },
                       )
                     : null,
                 border: OutlineInputBorder(
@@ -459,9 +501,9 @@ class _SearchBar extends StatelessWidget {
   }
 }
 
-/// 搜索历史建议列表
-class _SearchHistoryList extends StatelessWidget {
-  const _SearchHistoryList({
+/// 搜索历史下拉建议（紧凑卡片，匹配搜索框宽度）
+class _SearchHistoryDropdown extends StatelessWidget {
+  const _SearchHistoryDropdown({
     required this.items,
     required this.onTap,
     required this.onDelete,
@@ -474,31 +516,57 @@ class _SearchHistoryList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Expanded(
-      child: ListView.builder(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        itemCount: items.length,
-        itemBuilder: (context, index) {
-          final keyword = items[index];
-          return ListTile(
-            dense: true,
-            leading: Icon(
-              Icons.history_rounded,
-              size: 18,
-              color: theme.colorScheme.onSurfaceVariant,
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: JavBusLayout.listHorizontalPadding,
+      ),
+      child: Material(
+        elevation: 3,
+        borderRadius: const BorderRadius.vertical(
+          bottom: Radius.circular(12),
+        ),
+        color: theme.colorScheme.surface,
+        surfaceTintColor: theme.colorScheme.surfaceTint,
+        child: ClipRRect(
+          borderRadius: const BorderRadius.vertical(
+            bottom: Radius.circular(12),
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 280),
+            child: ListView.separated(
+              shrinkWrap: true,
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              itemCount: items.length,
+              separatorBuilder: (_, _) =>
+                  Divider(height: 1, indent: 48, color: theme.dividerColor),
+              itemBuilder: (context, index) {
+                final keyword = items[index];
+                return ListTile(
+                  dense: true,
+                  visualDensity: VisualDensity.compact,
+                  leading: Icon(
+                    Icons.history_rounded,
+                    size: 18,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  title: Text(
+                    keyword,
+                    style: theme.textTheme.bodyMedium,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.close_rounded, size: 16),
+                    onPressed: () => onDelete(keyword),
+                    tooltip: '删除',
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  onTap: () => onTap(keyword),
+                );
+              },
             ),
-            title: Text(
-              keyword,
-              style: theme.textTheme.bodyMedium,
-            ),
-            trailing: IconButton(
-              icon: const Icon(Icons.close_rounded, size: 16),
-              onPressed: () => onDelete(keyword),
-              tooltip: '删除',
-            ),
-            onTap: () => onTap(keyword),
-          );
-        },
+          ),
+        ),
       ),
     );
   }

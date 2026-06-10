@@ -27,11 +27,16 @@ class JavBusThreadPage extends ConsumerStatefulWidget {
     super.key,
     required this.threadId,
     required this.initialTitle,
+    this.fullThread,
     this.cache,
   });
 
   final int threadId;
   final String initialTitle;
+
+  /// 完整的帖子元数据（用于收藏时保留作者、浏览、回复等完整信息）
+  final ForumThread? fullThread;
+
   final JavBusThreadContentCache? cache;
 
   @override
@@ -47,12 +52,13 @@ class _JavBusThreadPageState extends ConsumerState<JavBusThreadPage> {
         title: Text(widget.initialTitle),
         actions: [
           _FavoriteButton(
-            thread: ForumThread(
-              threadId: widget.threadId,
-              forumId: 0,
-              title: widget.initialTitle,
-              author: '',
-            ),
+            thread: widget.fullThread ??
+                ForumThread(
+                  threadId: widget.threadId,
+                  forumId: 0,
+                  title: widget.initialTitle,
+                  author: '',
+                ),
             isFavorited: isFav,
             compact: true,
           ),

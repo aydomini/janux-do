@@ -192,6 +192,7 @@ class _ThreadCard extends StatelessWidget {
               builder: (_) => JavBusThreadPage(
                 threadId: thread.threadId,
                 initialTitle: thread.title,
+                fullThread: thread,
               ),
             ),
           );

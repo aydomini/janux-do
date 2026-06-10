@@ -35,8 +35,9 @@ class _JavBusShellPageState extends ConsumerState<JavBusShellPage> {
 
   void _selectForum(ForumForum forum) {
     setState(() {
-      // 点击已选中分区 → 取消选中，右侧恢复空白
-      if (_selectedForum?.forumId == forum.forumId) {
+      // 搜索/收藏模式下点击分区总是切换选中（用户明确意图），不执行取消逻辑
+      final isSpecialMode = _isSearchMode || _isFavoritesMode;
+      if (!isSpecialMode && _selectedForum?.forumId == forum.forumId) {
         _selectedForum = null;
       } else {
         _selectedForum = forum;
@@ -89,7 +90,12 @@ class _JavBusShellPageState extends ConsumerState<JavBusShellPage> {
   }
 
   void _selectThread(ForumThread thread) {
-    setState(() => _selectedThread = thread);
+    setState(() {
+      _selectedThread = thread;
+      // 从搜索或收藏模式中选中帖子 → 退出特殊模式，在右侧面板显示详情
+      _isSearchMode = false;
+      _isFavoritesMode = false;
+    });
   }
 
   @override
@@ -115,6 +121,7 @@ class _JavBusShellPageState extends ConsumerState<JavBusShellPage> {
             onToggleSearch: _toggleSearchMode,
             onToggleFavorites: _toggleFavoritesMode,
             onExitFavorites: _exitFavoritesMode,
+            onSelectThread: _selectThread,
           ),
           error: (_, _) => _FavoritesShell(
             forums: ForumCacheService.instance.cached,
@@ -122,6 +129,7 @@ class _JavBusShellPageState extends ConsumerState<JavBusShellPage> {
             onToggleSearch: _toggleSearchMode,
             onToggleFavorites: _toggleFavoritesMode,
             onExitFavorites: _exitFavoritesMode,
+            onSelectThread: _selectThread,
           ),
           data: (forums) => _FavoritesShell(
             forums: forums,
@@ -129,6 +137,7 @@ class _JavBusShellPageState extends ConsumerState<JavBusShellPage> {
             onToggleSearch: _toggleSearchMode,
             onToggleFavorites: _toggleFavoritesMode,
             onExitFavorites: _exitFavoritesMode,
+            onSelectThread: _selectThread,
           ),
         ),
       );
@@ -153,7 +162,7 @@ class _JavBusShellPageState extends ConsumerState<JavBusShellPage> {
               ),
             ),
             const VerticalDivider(width: 1),
-            Expanded(child: JavBusSearchPage(cache: _searchCache!)),
+            Expanded(child: JavBusSearchPage(cache: _searchCache!, onSelectThread: _selectThread)),
           ],
         ),
       );
@@ -284,9 +293,9 @@ class _DesktopShell extends StatelessWidget {
     // 搜索模式下右侧面板显示搜索页
     final Widget rightPane;
     if (isSearchMode) {
-      rightPane = JavBusSearchPage(cache: searchCache!);
+      rightPane = JavBusSearchPage(cache: searchCache!, onSelectThread: onSelectThread);
     } else if (isFavoritesMode) {
-      rightPane = const _FavoritesPane();
+      rightPane = _FavoritesPane(onSelectThread: onSelectThread);
     } else if (selectedThread != null) {
       rightPane = _ThreadReaderPane(
         key: ValueKey('reader-${selectedThread!.threadId}'),
@@ -427,7 +436,7 @@ class _CompactShell extends StatelessWidget {
             ),
           ),
           const Divider(height: 1),
-          Expanded(child: JavBusSearchPage(cache: searchCache!)),
+          Expanded(child: JavBusSearchPage(cache: searchCache!, onSelectThread: onSelectThread)),
         ],
       );
     }
@@ -450,7 +459,7 @@ class _CompactShell extends StatelessWidget {
             ),
           ),
           const Divider(height: 1),
-          const Expanded(child: _FavoritesPane()),
+          Expanded(child: _FavoritesPane(onSelectThread: onSelectThread)),
         ],
       );
     }
@@ -783,7 +792,9 @@ class _SidebarIconButton extends StatelessWidget {
 /// 列表页不显示返回按钮（与论坛主题列表页一致），
 /// 返回按钮仅出现在从收藏列表点进去的帖子详情页。
 class _FavoritesPane extends ConsumerWidget {
-  const _FavoritesPane();
+  const _FavoritesPane({this.onSelectThread});
+
+  final ValueChanged<ForumThread>? onSelectThread;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -863,14 +874,21 @@ class _FavoritesPane extends ConsumerWidget {
   }
 
   void _openFavoriteThread(BuildContext context, ForumThread thread) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => JavBusThreadPage(
-          threadId: thread.threadId,
-          initialTitle: thread.title,
+    final onSelectThread = this.onSelectThread;
+    if (onSelectThread != null) {
+      // shell 模式：在右侧面板内联显示详情，保留侧边栏
+      onSelectThread(thread);
+    } else {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => JavBusThreadPage(
+            threadId: thread.threadId,
+            initialTitle: thread.title,
+            fullThread: thread,
+          ),
         ),
-      ),
-    );
+      );
+    }
   }
 }
 
@@ -882,6 +900,7 @@ class _FavoritesShell extends StatelessWidget {
     required this.onToggleSearch,
     required this.onToggleFavorites,
     required this.onExitFavorites,
+    this.onSelectThread,
   });
 
   final List<ForumForum> forums;
@@ -889,6 +908,7 @@ class _FavoritesShell extends StatelessWidget {
   final VoidCallback onToggleSearch;
   final VoidCallback onToggleFavorites;
   final VoidCallback onExitFavorites;
+  final ValueChanged<ForumThread>? onSelectThread;
 
   @override
   Widget build(BuildContext context) {
@@ -914,7 +934,7 @@ class _FavoritesShell extends StatelessWidget {
                 ),
               ),
               const Divider(height: 1),
-              const Expanded(child: _FavoritesPane()),
+              Expanded(child: _FavoritesPane(onSelectThread: onSelectThread)),
             ],
           );
         }
@@ -933,7 +953,7 @@ class _FavoritesShell extends StatelessWidget {
               ),
             ),
             const VerticalDivider(width: 1),
-            const Expanded(child: _FavoritesPane()),
+            Expanded(child: _FavoritesPane(onSelectThread: onSelectThread)),
           ],
         );
       },
