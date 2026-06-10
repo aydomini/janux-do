@@ -371,6 +371,15 @@ class JavbusAdapter extends ForumAdapter {
     String? referer,
     bool browserNavigation = false,
   }) async {
+    // 确保年龄验证 Cookie 始终存在。
+    // 不依赖 _warmUp 调用时机 —— 任何请求在发送前都强制补齐 Cookie，
+    // 避免 _warmUp 未执行或 Cookie 被清空后首次请求即被 302 到登录页。
+    if (!_cookies.containsKey('existmag') || _cookies['existmag'] != 'all') {
+      _cookies['existmag'] = 'all';
+    }
+    if (!_cookies.containsKey('age') || _cookies['age'] != 'verified') {
+      _cookies['age'] = 'verified';
+    }
     try {
       final response = await _dio.getUri<String>(
         uri,
