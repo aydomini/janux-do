@@ -147,7 +147,19 @@ class PostHtmlCleaner {
   void _resolveAttribute(Element element, String attribute) {
     final value = element.attributes[attribute]?.trim();
     if (value == null || value.isEmpty || value.startsWith('#')) return;
+    // 跳过非 HTTP scheme 的 URL（data: / javascript: / mailto: 等），
+    // 这些 URL 无法被 JavBusUrlBuilder.resolve 处理，且不应被重写
+    if (_hasNonHttpScheme(value)) return;
     element.attributes[attribute] = urlBuilder.resolve(value);
+  }
+
+  static bool _hasNonHttpScheme(String url) {
+    final lower = url.toLowerCase();
+    return lower.startsWith('data:') ||
+        lower.startsWith('javascript:') ||
+        lower.startsWith('mailto:') ||
+        lower.startsWith('tel:') ||
+        lower.startsWith('ftp:');
   }
 
   static String _serializeNode(Node node) {

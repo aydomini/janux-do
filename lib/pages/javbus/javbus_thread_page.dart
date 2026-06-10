@@ -114,6 +114,7 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
   StackTrace? _stackTrace;
   int? _threadAuthorId;
   Map<int, List<ForumComment>> _comments = {};
+  DateTime? _lastHeightRecord;
 
   @override
   void initState() {
@@ -138,7 +139,13 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
   void _onScroll() {
     final position = _scrollController.position;
     _cache.scrollOffset = position.pixels;
-    _recordPostHeights();
+    // 节流：最多每 500ms 记录一次帖子高度，避免每次滚动事件都遍历全部 Widget
+    final now = DateTime.now();
+    if (_lastHeightRecord == null ||
+        now.difference(_lastHeightRecord!).inMilliseconds > 500) {
+      _recordPostHeights();
+      _lastHeightRecord = now;
+    }
     if (position.extentAfter > 600) return;
     _loadNextPage();
   }
@@ -162,8 +169,22 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
     if (offset <= 0) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scrollController.hasClients) return;
-      final maxOffset = _scrollController.position.maxScrollExtent;
-      _scrollController.jumpTo(offset.clamp(0, maxOffset));
+      _applyScrollRestore(offset);
+    });
+  }
+
+  /// 递归重试恢复滚动位置，直到内容完成布局后 maxScrollExtent 足够承载目标偏移
+  void _applyScrollRestore(double targetOffset, {int retryCount = 0}) {
+    if (!_scrollController.hasClients) return;
+    final maxOffset = _scrollController.position.maxScrollExtent;
+    // maxScrollExtent 已够大，或重试超过 8 次（约 400ms），直接跳转
+    if (maxOffset >= targetOffset - 10 || retryCount >= 8) {
+      _scrollController.jumpTo(targetOffset.clamp(0.0, maxOffset));
+      return;
+    }
+    Future.delayed(const Duration(milliseconds: 50), () {
+      if (!mounted) return;
+      _applyScrollRestore(targetOffset, retryCount: retryCount + 1);
     });
   }
 
@@ -229,6 +250,12 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
   Future<void> _loadNextPage() async {
     if (_isLoadingInitial || _isLoadingMore || !_hasNextPage) return;
     final requestedPage = _currentPage + 1;
+
+    // 捕获加载前的滚动偏移，用于 ListView 重建后恢复位置
+    final prePixels = _scrollController.hasClients
+        ? _scrollController.position.pixels
+        : 0.0;
+
     setState(() {
       _isLoadingMore = true;
       _error = null;
@@ -251,6 +278,8 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
         _stackTrace = null;
         _saveCache();
       });
+      // 恢复加载前的滚动位置，抵消 ListView 重建 + 异步内容加载导致的位置漂移
+      _restoreScrollAfterLoad(prePixels);
       _loadComments(requestedPage);
     } catch (error, stackTrace) {
       if (!mounted) return;
@@ -260,6 +289,20 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
         _isLoadingMore = false;
       });
     }
+  }
+
+  /// 若 ListView 重建后位置漂移超过 100px，静默跳回加载前位置
+  void _restoreScrollAfterLoad(double prePixels) {
+    if (prePixels <= 0) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) return;
+      final currentPixels = _scrollController.position.pixels;
+      final drift = (currentPixels - prePixels).abs();
+      if (drift > 100) {
+        final maxOffset = _scrollController.position.maxScrollExtent;
+        _scrollController.jumpTo(prePixels.clamp(0.0, maxOffset));
+      }
+    });
   }
 
   /// 帖子 ID → GlobalKey 映射，用于引用跳转精确定位

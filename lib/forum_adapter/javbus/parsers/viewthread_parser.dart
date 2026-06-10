@@ -35,7 +35,27 @@ class ViewThreadParser {
 
     final posts = <ForumPost>[];
     var floorFallback = 1;
-    int? threadAuthorId;
+
+    // JavBus 自定义主题将第一帖（楼主）的作者信息放在 .nthread_info 中
+    // 而非 post 容器内，需从页面级区域预提取
+    final threadHeaderAuthorLink = document.querySelector(
+      '.nthread_info .authi a[href*="uid="]',
+    );
+    final threadHeaderAuthorId = _extractQueryInt(
+          threadHeaderAuthorLink?.attributes['href'] ?? '', 'uid',
+        ) ??
+        _extractQueryInt(
+          document
+                  .querySelector('.nthread_info a.lz[href*="authorid="]')
+                  ?.attributes['href'] ??
+              '',
+          'authorid',
+        );
+    final threadHeaderAuthorName =
+        threadHeaderAuthorLink?.text.trim() ?? '';
+
+    // 从页面 header 预提取的楼主 ID 作为初始值，确保跨页楼主回复也能识别
+    int? threadAuthorId = threadHeaderAuthorId;
 
     for (final scope in _postScopes(document)) {
       final postId = _extractPostId(scope.anchor);
@@ -47,24 +67,33 @@ class ViewThreadParser {
       final contentHtml = htmlCleaner.clean(rawContentHtml);
       final authorId = _extractQueryInt(author?.attributes['href'] ?? '', 'uid');
       final floorNumber = _extractFloor(container) ?? floorFallback;
-      // 第一页的 #1 楼始终是楼主；后续页面通过 authorId 对比兜底
+      // 第一帖（floorNumber == 1）作者可能来自 .nthread_info（JavBus 自定义主题）
+      var authorName = author?.text.trim() ?? '';
+      if (authorName.isEmpty && floorNumber == 1) {
+        authorName = threadHeaderAuthorName;
+      }
+      // 仅 floorNumber 明确为 1 时用 header 信息补全缺失的 authorId
+      final effectiveAuthorId =
+          authorId ?? (floorNumber == 1 ? threadHeaderAuthorId : null);
+      // 若 header 未提取到楼主 ID（非 JavBus 主题），第一帖 authorId 作为兜底
       if (threadAuthorId == null && floorNumber == 1) {
-        threadAuthorId = authorId;
+        threadAuthorId = effectiveAuthorId ?? authorId;
       }
       posts.add(
         ForumPost(
           postId: postId,
           threadId: threadId,
           floorNumber: floorNumber,
-          author: author?.text.trim() ?? '',
-          authorId: authorId,
+          author: authorName,
+          authorId: effectiveAuthorId,
           createdAt: timeParser.parse(_timeText(container)),
           avatarUrl: _extractAvatarUrl(container, urlBuilder)
-              ?? urlBuilder.buildAvatarUrl(authorId),
+              ?? urlBuilder.buildAvatarUrl(effectiveAuthorId),
           contentHtml: contentHtml,
           attachments: _extractAttachments(message),
-          isThreadAuthor:
-              authorId != null && authorId == threadAuthorId,
+          isThreadAuthor: floorNumber == 1 ||
+              (effectiveAuthorId != null &&
+                  effectiveAuthorId == threadAuthorId),
         ),
       );
       floorFallback++;
