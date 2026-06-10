@@ -805,6 +805,7 @@ class _FavoritesPane extends ConsumerWidget {
     final theme = Theme.of(context);
 
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SafeArea(
           bottom: false,

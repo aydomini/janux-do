@@ -114,10 +114,15 @@ void main() {
         fixtureAdapter.requests.last.headers['Upgrade-Insecure-Requests'],
         '1',
       );
-      expect(
-        fixtureAdapter.requests.last.headers['Cookie'],
-        'existmag=all; age=verified; bus_session=abc123',
-      );
+      // macOS 上 NativeAdapter 从 HTTPCookieStorage 获取 Cookie，
+      // 无需手动设置 Cookie 请求头（NSURLSession 会剥离它）。
+      // 非 macOS 平台使用 Dart HttpClient，手动设置 Cookie 头。
+      if (!Platform.isMacOS) {
+        expect(
+          fixtureAdapter.requests.last.headers['Cookie'],
+          'existmag=all; age=verified; bus_session=abc123',
+        );
+      }
     });
 
     test(
@@ -131,8 +136,8 @@ void main() {
 
         await adapter.getThreads(forumId: 2, filterTypeId: 8, page: 1);
 
-        // 只发一次桌面版请求
-        final uri = fixtureAdapter.requests.single.uri;
+        // _ensureSessionWarm 可能先发一次首页请求，取最后一个请求验证
+        final uri = fixtureAdapter.requests.last.uri;
         expect(uri.queryParameters['mod'], 'forumdisplay');
         expect(uri.queryParameters['fid'], '2');
         expect(uri.queryParameters['filter'], 'typeid');
@@ -151,7 +156,8 @@ void main() {
 
       expect(result.threads, hasLength(2));
       expect(result.threads.first.threadId, 1001);
-      final uri = fixtureAdapter.requests.single.uri;
+      // _ensureSessionWarm 可能先发一次首页请求，取最后一个请求验证
+      final uri = fixtureAdapter.requests.last.uri;
       expect(uri.queryParameters['mod'], 'forumdisplay');
       expect(uri.queryParameters['fid'], '2');
       expect(uri.queryParameters['page'], '1');
@@ -168,11 +174,12 @@ void main() {
 
       expect(result.threadTitle, '普通主题');
       expect(result.posts, hasLength(2));
-      final uri = fixtureAdapter.requests.single.uri;
+      // _ensureSessionWarm 可能先发一次首页请求，取最后一个请求验证
+      final uri = fixtureAdapter.requests.last.uri;
       expect(uri.queryParameters['module'], 'viewthread');
       expect(uri.queryParameters['tid'], '1002');
       expect(
-        fixtureAdapter.requests.single.headers['User-Agent'],
+        fixtureAdapter.requests.last.headers['User-Agent'],
         contains('Mobile'),
       );
     });

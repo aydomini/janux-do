@@ -26,6 +26,12 @@ class MainFlutterWindow: NSWindow {
         }
         self.setCookiesToSharedStorage(args)
         result(true)
+      case "getCookies":
+        guard let urlString = call.arguments as? String else {
+          result(FlutterError(code: "INVALID_ARGS", message: "Expected URL string", details: nil))
+          return
+        }
+        result(self.getCookiesFromSharedStorage(url: urlString))
       case "clearCookies":
         let url = (call.arguments as? String) ?? ""
         self.clearCookiesFromSharedStorage(url: url)
@@ -83,6 +89,34 @@ class MainFlutterWindow: NSWindow {
           storage.deleteCookie(cookie)
         }
       }
+    }
+  }
+
+  /// 读取 HTTPCookieStorage.shared 中指定 URL 的 cookie，返回 Dart 可用格式
+  private func getCookiesFromSharedStorage(url: String) -> [[String: Any?]] {
+    let storage = HTTPCookieStorage.shared
+    guard let nsUrl = URL(string: url),
+          let urlHost = nsUrl.host,
+          let cookies = storage.cookies else {
+      return []
+    }
+    return cookies.compactMap { cookie in
+      // 域名匹配：cookie domain 包含 url host 或反之
+      if !urlHost.hasSuffix(cookie.domain) && !cookie.domain.hasSuffix(urlHost) {
+        return nil
+      }
+      var map: [String: Any?] = [
+        "name": cookie.name,
+        "value": cookie.value,
+        "path": cookie.path,
+        "domain": cookie.domain,
+        "isSecure": cookie.isSecure,
+        "isHttpOnly": cookie.isHTTPOnly,
+      ]
+      if let expires = cookie.expiresDate {
+        map["expiresDate"] = Int(expires.timeIntervalSince1970 * 1000)
+      }
+      return map
     }
   }
 }
