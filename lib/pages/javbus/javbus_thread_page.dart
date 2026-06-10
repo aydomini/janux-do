@@ -162,6 +162,7 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
     _isLoadingMore = false;
     _error = null;
     _stackTrace = null;
+    _trackThreadAuthor();
   }
 
   void _restoreScrollOffset() {

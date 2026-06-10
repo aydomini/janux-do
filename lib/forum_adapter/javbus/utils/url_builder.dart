@@ -18,6 +18,11 @@ class JavBusUrlBuilder {
     if (trimmed.isEmpty) {
       return baseUri.toString();
     }
+    // 跳过带有特殊 scheme 的 URL（data:/javascript:/mailto: 等），
+    // 这些 URL 无法被 Dart Uri 解析器正确处理，应原样返回
+    if (_isUnresolvableScheme(trimmed)) {
+      return trimmed;
+    }
     if (trimmed.startsWith('//')) {
       return Uri.parse('${baseUri.scheme}:$trimmed').toString();
     }
@@ -31,7 +36,21 @@ class JavBusUrlBuilder {
 
     // Dart Uri.resolve 对以 / 开头的绝对路径会正确替换整个 path，
     // 对相对路径会自然追加到 base path 后面，无需手动剥离前缀
-    return baseUri.resolve(trimmed).toString();
+    try {
+      return baseUri.resolve(trimmed).toString();
+    } on FormatException {
+      // Uri.tryParse 失败时回退（如超长 data: URI），原样返回
+      return trimmed;
+    }
+  }
+
+  static bool _isUnresolvableScheme(String url) {
+    final lower = url.toLowerCase();
+    return lower.startsWith('data:') ||
+        lower.startsWith('javascript:') ||
+        lower.startsWith('mailto:') ||
+        lower.startsWith('tel:') ||
+        lower.startsWith('ftp:');
   }
 
   /// UC 头像域名（从桌面版页面 HTML 中自动检测）

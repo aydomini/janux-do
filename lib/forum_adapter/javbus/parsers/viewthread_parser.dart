@@ -38,18 +38,17 @@ class ViewThreadParser {
 
     // JavBus 自定义主题将第一帖（楼主）的作者信息放在 .nthread_info 中
     // 而非 post 容器内，需从页面级区域预提取
+    // 多级备选：1) .nthread_info 作者链接 2) 楼主"只看該作者"链接 3) 页面中第一个 uid 链接
     final threadHeaderAuthorLink = document.querySelector(
-      '.nthread_info .authi a[href*="uid="]',
-    );
+          '.nthread_info .authi a[href*="uid="]',
+        ) ??
+        document.querySelector('.nthread_info a[href*="uid="]') ??
+        document.querySelector('a.lz[href*="authorid="]');
     final threadHeaderAuthorId = _extractQueryInt(
           threadHeaderAuthorLink?.attributes['href'] ?? '', 'uid',
         ) ??
         _extractQueryInt(
-          document
-                  .querySelector('.nthread_info a.lz[href*="authorid="]')
-                  ?.attributes['href'] ??
-              '',
-          'authorid',
+          threadHeaderAuthorLink?.attributes['href'] ?? '', 'authorid',
         );
     final threadHeaderAuthorName =
         threadHeaderAuthorLink?.text.trim() ?? '';
