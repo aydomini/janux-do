@@ -252,10 +252,8 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
     if (_isLoadingInitial || _isLoadingMore || !_hasNextPage) return;
     final requestedPage = _currentPage + 1;
 
-    // 捕获加载前的滚动偏移，用于 ListView 重建后恢复位置
-    final prePixels = _scrollController.hasClients
-        ? _scrollController.position.pixels
-        : 0.0;
+    // 锚定当前视口顶部帖子，加载后精确恢复，防止跳动
+    _captureScrollAnchor();
 
     setState(() {
       _isLoadingMore = true;
@@ -279,8 +277,8 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
         _stackTrace = null;
         _saveCache();
       });
-      // 恢复加载前的滚动位置，抵消 ListView 重建 + 异步内容加载导致的位置漂移
-      _restoreScrollAfterLoad(prePixels);
+      // 基于帖子锚定恢复滚动位置
+      _restoreScrollAnchor();
       _loadComments(requestedPage);
     } catch (error, stackTrace) {
       if (!mounted) return;
@@ -292,17 +290,47 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
     }
   }
 
-  /// 若 ListView 重建后位置漂移超过 100px，静默跳回加载前位置
-  void _restoreScrollAfterLoad(double prePixels) {
-    if (prePixels <= 0) return;
+  int? _anchorPostIndex;
+  double? _anchorOffsetFromTop;
+
+  /// 记录加载前视口顶部第一个可见帖子的索引及其距视口顶部的偏移
+  void _captureScrollAnchor() {
+    _anchorPostIndex = null;
+    _anchorOffsetFromTop = null;
+    if (!_scrollController.hasClients || _posts.isEmpty) return;
+    final position = _scrollController.position;
+    // 用户主动滚动到接近底部（extentAfter <= 600）触发的加载不需要锚定，
+    // 让新内容自然出现在下方；仅在视口中间触发的加载（图片/高亮异步撑高导致
+    // extentAfter 骤降）才需要锚定防止跳动
+    if (position.extentAfter <= 600) return;
+    // 先刷新当前可见帖子的高度，提高估算精度
+    _recordPostHeights();
+    final pixels = position.pixels;
+    double accumulated = JavBusLayout.threadPadding.top;
+    for (var i = 0; i < _posts.length; i++) {
+      final postId = _posts[i].postId;
+      final height = _postHeights[postId] ?? _estimatedPostHeight;
+      if (accumulated + height > pixels) {
+        _anchorPostIndex = i;
+        _anchorOffsetFromTop = pixels - accumulated;
+        return;
+      }
+      accumulated += height + 28; // divider
+    }
+  }
+
+  /// 加载完成后将视口恢复到锚定帖子位置
+  void _restoreScrollAnchor() {
+    final targetIndex = _anchorPostIndex;
+    final targetOffset = _anchorOffsetFromTop;
+    if (targetIndex == null || targetOffset == null) return;
+    if (targetIndex >= _posts.length) return;
+
+    final offset = _estimatePostOffset(targetIndex) + targetOffset;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scrollController.hasClients) return;
-      final currentPixels = _scrollController.position.pixels;
-      final drift = (currentPixels - prePixels).abs();
-      if (drift > 100) {
-        final maxOffset = _scrollController.position.maxScrollExtent;
-        _scrollController.jumpTo(prePixels.clamp(0.0, maxOffset));
-      }
+      final maxOffset = _scrollController.position.maxScrollExtent;
+      _scrollController.jumpTo(offset.clamp(0.0, maxOffset));
     });
   }
 
