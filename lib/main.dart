@@ -15,6 +15,8 @@ import 'services/highlighter_service.dart';
 import 'services/network/cookie/csrf_token_service.dart';
 import 'services/network/cookie/cookie_jar_service.dart';
 import 'services/data_management/cache_size_service.dart';
+import 'services/favorites_service.dart';
+import 'services/forum_cache_service.dart';
 import 'services/javbus_cache_manager.dart';
 import 'l10n/s.dart';
 
@@ -69,6 +71,8 @@ Future<void> main() async {
       WindowsWebViewEnvironmentService.instance.initialize(),
     CookieJarService().initialize(),
     CsrfTokenService().init(),
+    FavoritesService.instance.init(),
+    ForumCacheService.instance.init(),
     TimeUtils.initialize(),
   ];
   // 桌面平台初始化 window_manager 和 flutter_acrylic
@@ -131,6 +135,9 @@ Future<void> main() async {
   } catch (e) {
     debugPrint('[Main] 初始连接状态同步失败: $e');
   }
+
+  // 启动网络状态持续监听，macOS 重启后 WiFi 就绪时自动触发刷新
+  ConnectivityService().init();
 
   // 初始化下载服务
   DownloadService().initialize();

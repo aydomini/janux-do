@@ -46,6 +46,7 @@ class ForumDisplayParser {
       final author = _extractAuthor(container);
       final createdAtText = _extractTimeText(container, text);
       final createdAt = timeParser.parse(createdAtText) ?? DateTime.now();
+      final lastReplyAt = _extractLastReplyTime(container);
       threads.add(
         ForumThread(
           threadId: threadId,
@@ -56,6 +57,7 @@ class ForumDisplayParser {
           replies: stats.replies,
           views: stats.views,
           createdAt: createdAt,
+          lastReplyAt: lastReplyAt,
           isPinned: _isPinned(container),
           url: urlBuilder.resolve(href),
         ),
@@ -126,6 +128,29 @@ class ForumDisplayParser {
         .replaceAll(RegExp(r'回\s*\d+'), '')
         .replaceAll(RegExp(r'回复\s*\d+\s*/\s*查看\s*\d+'), '')
         .trim();
+  }
+
+  /// 从 span.time.y 中提取最后回复时间
+  ///
+  /// 真实 Discuz HTML 格式: <span class="time y">miaoeng @ 3 分钟前</span>
+  /// 取 @ 后的时间字符串，交由 [timeParser] 解析。
+  DateTime? _extractLastReplyTime(Element? container) {
+    if (container == null) return null;
+
+    // 桌面版 JavBus 模板：span.time.y
+    final timeYEl = container.querySelector('span.time.y');
+    if (timeYEl != null) {
+      final raw = timeYEl.text.trim();
+      final atIndex = raw.lastIndexOf('@');
+      if (atIndex >= 0 && atIndex + 1 < raw.length) {
+        final timePart = raw.substring(atIndex + 1).trim();
+        if (timePart.isNotEmpty) {
+          return timeParser.parse(timePart);
+        }
+      }
+    }
+
+    return null;
   }
 
   static bool _isPinned(Element? element) {

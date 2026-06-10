@@ -11,6 +11,7 @@ class ForumThread {
     this.views = 0,
     this.createdAt,
     this.lastReplyAt,
+    this.forumName,
     this.isPinned = false,
     this.isDigest = false,
     this.excerpt,
@@ -28,6 +29,7 @@ class ForumThread {
   final int views;
   final DateTime? createdAt;
   final DateTime? lastReplyAt;
+  final String? forumName;
   final bool isPinned;
   final bool isDigest;
   final String? excerpt;

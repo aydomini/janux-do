@@ -5,12 +5,17 @@ import 'package:jovial_svg/jovial_svg.dart';
 import '../../forum_adapter/adapter.dart';
 import '../../forum_adapter/models/forum_forum.dart';
 import '../../forum_adapter/models/forum_thread.dart';
+import '../../providers/connectivity_provider.dart';
+import '../../providers/favorites_provider.dart';
 import '../../providers/forum_provider.dart';
+import '../../services/forum_cache_service.dart';
 
 import '../../widgets/common/error_view.dart';
 import '../../widgets/topic/topic_list_skeleton.dart';
 import 'javbus_layout.dart';
+import 'javbus_search_page.dart';
 import 'javbus_thread_page.dart';
+import 'javbus_thread_row.dart';
 
 class JavBusShellPage extends ConsumerStatefulWidget {
   const JavBusShellPage({super.key});
@@ -22,18 +27,65 @@ class JavBusShellPage extends ConsumerStatefulWidget {
 class _JavBusShellPageState extends ConsumerState<JavBusShellPage> {
   ForumForum? _selectedForum;
   ForumThread? _selectedThread;
+  bool _isSearchMode = false;
+  bool _isFavoritesMode = false;
   final Map<String, _ThreadListPaneCache> _threadListCaches = {};
   final Map<int, JavBusThreadContentCache> _threadContentCaches = {};
+  SearchPaneCache? _searchCache;
 
   void _selectForum(ForumForum forum) {
-    if (_selectedForum?.forumId == forum.forumId &&
-        _selectedForum?.filterTypeId == forum.filterTypeId) {
-      return;
-    }
     setState(() {
-      _selectedForum = forum;
+      // 点击已选中分区 → 取消选中，右侧恢复空白
+      if (_selectedForum?.forumId == forum.forumId) {
+        _selectedForum = null;
+      } else {
+        _selectedForum = forum;
+      }
+      _selectedThread = null;
+      _isSearchMode = false;
+      _isFavoritesMode = false;
+    });
+  }
+
+  void _enterSearchMode() {
+    setState(() {
+      _isSearchMode = true;
+      _isFavoritesMode = false;
+      _selectedThread = null;
+      _searchCache ??= SearchPaneCache();
+    });
+  }
+
+  void _exitSearchMode() {
+    setState(() => _isSearchMode = false);
+  }
+
+  void _enterFavoritesMode() {
+    setState(() {
+      _isFavoritesMode = true;
+      _isSearchMode = false;
       _selectedThread = null;
     });
+  }
+
+  void _exitFavoritesMode() {
+    setState(() => _isFavoritesMode = false);
+  }
+
+  void _toggleSearchMode() {
+    if (_isSearchMode) {
+      _exitSearchMode();
+    } else {
+      _enterSearchMode();
+    }
+  }
+
+  void _toggleFavoritesMode() {
+    if (_isFavoritesMode) {
+      _exitFavoritesMode();
+    } else {
+      _enterFavoritesMode();
+    }
   }
 
   void _selectThread(ForumThread thread) {
@@ -42,53 +94,152 @@ class _JavBusShellPageState extends ConsumerState<JavBusShellPage> {
 
   @override
   Widget build(BuildContext context) {
+    // 监听网络恢复：macOS 重启后 WiFi 就绪时自动重新加载论坛列表
+    ref.listen(isConnectedProvider, (prev, next) {
+      final wasDisconnected = prev is AsyncData<bool> && prev.value == false;
+      final isNowConnected = next is AsyncData<bool> && next.value == true;
+      if (wasDisconnected && isNowConnected) {
+        ref.read(forumListProvider.notifier).refresh();
+      }
+    });
+
     final forumsAsync = ref.watch(forumListProvider);
+
+    // 收藏模式独立于论坛数据加载状态，即使网络异常也能查看收藏
+    if (_isFavoritesMode) {
+      return Scaffold(
+        body: forumsAsync.when(
+          loading: () => _FavoritesShell(
+            forums: ForumCacheService.instance.cached,
+            isFavoritesMode: true,
+            onToggleSearch: _toggleSearchMode,
+            onToggleFavorites: _toggleFavoritesMode,
+            onExitFavorites: _exitFavoritesMode,
+          ),
+          error: (_, _) => _FavoritesShell(
+            forums: ForumCacheService.instance.cached,
+            isFavoritesMode: true,
+            onToggleSearch: _toggleSearchMode,
+            onToggleFavorites: _toggleFavoritesMode,
+            onExitFavorites: _exitFavoritesMode,
+          ),
+          data: (forums) => _FavoritesShell(
+            forums: forums,
+            isFavoritesMode: true,
+            onToggleSearch: _toggleSearchMode,
+            onToggleFavorites: _toggleFavoritesMode,
+            onExitFavorites: _exitFavoritesMode,
+          ),
+        ),
+      );
+    }
+
+    // 搜索模式：有缓存数据即可显示侧边栏
+    if (_isSearchMode) {
+      final sidebarForums = forumsAsync.asData?.value ?? ForumCacheService.instance.cached;
+      return Scaffold(
+        body: Row(
+          children: [
+            SizedBox(
+              width: JavBusLayout.sidebarWidth,
+              child: _ForumSidebar(
+                forums: sidebarForums,
+                selectedForum: _selectedForum,
+                isSearchMode: true,
+                isFavoritesMode: false,
+                onSelectForum: _selectForum,
+                onToggleSearch: _toggleSearchMode,
+                onToggleFavorites: _toggleFavoritesMode,
+              ),
+            ),
+            const VerticalDivider(width: 1),
+            Expanded(child: JavBusSearchPage(cache: _searchCache!)),
+          ],
+        ),
+      );
+    }
+
     return Scaffold(
       body: forumsAsync.when(
-        loading: () => const TopicListSkeleton(),
-        error: (error, stackTrace) => ErrorView(
-          error: error,
-          stackTrace: stackTrace,
-          title: 'JANUX DO 加载失败',
-          onRetry: () => ref.invalidate(forumListProvider),
-        ),
+        loading: () {
+          // 有缓存：立即显示侧边栏，右侧显示加载中
+          final cached = ForumCacheService.instance.cached;
+          if (cached.isNotEmpty) {
+            return _buildShell(cached);
+          }
+          return const TopicListSkeleton();
+        },
+        error: (error, stackTrace) {
+          // 有缓存：静默使用缓存，不显示错误
+          final cached = ForumCacheService.instance.cached;
+          if (cached.isNotEmpty) {
+            return _buildShell(cached);
+          }
+          return ErrorView(
+            error: error,
+            stackTrace: stackTrace,
+            title: 'JANUX DO 加载失败',
+            onRetry: () => ref.read(forumListProvider.notifier).refresh(),
+          );
+        },
         data: (forums) {
           if (forums.isEmpty) {
             return const _ShellEmptyState(message: '暂无可浏览版块');
           }
-          final selectedForum = _selectedForum ?? forums.first;
-          final listCache = _threadListCaches.putIfAbsent(
-            _forumPaneKey(selectedForum),
-            _ThreadListPaneCache.new,
-          );
-          return LayoutBuilder(
-            builder: (context, constraints) {
-              if (constraints.maxWidth < JavBusLayout.compactBreakpoint) {
-                return _CompactShell(
-                  forums: forums,
-                  selectedForum: selectedForum,
-                  selectedThread: _selectedThread,
-                  selectedForumListCache: listCache,
-                  threadContentCaches: _threadContentCaches,
-                  onSelectForum: _selectForum,
-                  onSelectThread: _selectThread,
-                  onBackToList: () => setState(() => _selectedThread = null),
-                );
-              }
-              return _DesktopShell(
-                forums: forums,
-                selectedForum: selectedForum,
-                selectedThread: _selectedThread,
-                selectedForumListCache: listCache,
-                threadContentCaches: _threadContentCaches,
-                onSelectForum: _selectForum,
-                onSelectThread: _selectThread,
-                onBackToList: () => setState(() => _selectedThread = null),
-              );
-            },
-          );
+          return _buildShell(forums);
         },
       ),
+    );
+  }
+
+  Widget _buildShell(List<ForumForum> forums) {
+    final selectedForum = _selectedForum;
+    final listCache = selectedForum != null
+        ? _threadListCaches.putIfAbsent(
+            _forumPaneKey(selectedForum),
+            _ThreadListPaneCache.new,
+          )
+        : null;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < JavBusLayout.compactBreakpoint) {
+          return _CompactShell(
+            forums: forums,
+            selectedForum: selectedForum,
+            selectedThread: _selectedThread,
+            isSearchMode: false,
+            isFavoritesMode: false,
+            searchCache: _searchCache,
+            selectedForumListCache: listCache,
+            threadContentCaches: _threadContentCaches,
+            onSelectForum: _selectForum,
+            onSelectThread: _selectThread,
+            onToggleSearch: _toggleSearchMode,
+            onToggleFavorites: _toggleFavoritesMode,
+            onExitSearch: _exitSearchMode,
+            onExitFavorites: _exitFavoritesMode,
+            onBackToList: () => setState(() => _selectedThread = null),
+          );
+        }
+        return _DesktopShell(
+          forums: forums,
+          selectedForum: selectedForum,
+          selectedThread: _selectedThread,
+          isSearchMode: false,
+          isFavoritesMode: false,
+          searchCache: _searchCache,
+          selectedForumListCache: listCache,
+          threadContentCaches: _threadContentCaches,
+          onSelectForum: _selectForum,
+          onSelectThread: _selectThread,
+          onToggleSearch: _toggleSearchMode,
+          onToggleFavorites: _toggleFavoritesMode,
+          onExitSearch: _exitSearchMode,
+          onExitFavorites: _exitFavoritesMode,
+          onBackToList: () => setState(() => _selectedThread = null),
+        );
+      },
     );
   }
 }
@@ -98,24 +249,69 @@ class _DesktopShell extends StatelessWidget {
     required this.forums,
     required this.selectedForum,
     required this.selectedThread,
+    required this.isSearchMode,
+    required this.isFavoritesMode,
+    required this.searchCache,
     required this.selectedForumListCache,
     required this.threadContentCaches,
     required this.onSelectForum,
     required this.onSelectThread,
+    required this.onToggleSearch,
+    required this.onToggleFavorites,
+    required this.onExitSearch,
+    required this.onExitFavorites,
     required this.onBackToList,
   });
 
   final List<ForumForum> forums;
-  final ForumForum selectedForum;
+  final ForumForum? selectedForum;
   final ForumThread? selectedThread;
-  final _ThreadListPaneCache selectedForumListCache;
+  final bool isSearchMode;
+  final bool isFavoritesMode;
+  final SearchPaneCache? searchCache;
+  final _ThreadListPaneCache? selectedForumListCache;
   final Map<int, JavBusThreadContentCache> threadContentCaches;
   final ValueChanged<ForumForum> onSelectForum;
   final ValueChanged<ForumThread> onSelectThread;
+  final VoidCallback onToggleSearch;
+  final VoidCallback onToggleFavorites;
+  final VoidCallback onExitSearch;
+  final VoidCallback onExitFavorites;
   final VoidCallback onBackToList;
 
   @override
   Widget build(BuildContext context) {
+    // 搜索模式下右侧面板显示搜索页
+    final Widget rightPane;
+    if (isSearchMode) {
+      rightPane = JavBusSearchPage(cache: searchCache!);
+    } else if (isFavoritesMode) {
+      rightPane = const _FavoritesPane();
+    } else if (selectedThread != null) {
+      rightPane = _ThreadReaderPane(
+        key: ValueKey('reader-${selectedThread!.threadId}'),
+        thread: selectedThread!,
+        cache: threadContentCaches.putIfAbsent(
+          selectedThread!.threadId,
+          JavBusThreadContentCache.new,
+        ),
+        onBackToList: onBackToList,
+      );
+    } else {
+      final forum = selectedForum;
+      final cache = selectedForumListCache;
+      if (forum != null && cache != null) {
+        rightPane = _ThreadListPane(
+          key: ValueKey(_forumPaneKey(forum)),
+          forum: forum,
+          cache: cache,
+          onSelectThread: onSelectThread,
+        );
+      } else {
+        rightPane = _EmptyRightPane(forums: forums);
+      }
+    }
+
     return Row(
       children: [
         SizedBox(
@@ -123,36 +319,54 @@ class _DesktopShell extends StatelessWidget {
           child: _ForumSidebar(
             forums: forums,
             selectedForum: selectedForum,
+            isSearchMode: isSearchMode,
+            isFavoritesMode: isFavoritesMode,
             onSelectForum: onSelectForum,
+            onToggleSearch: onToggleSearch,
+            onToggleFavorites: onToggleFavorites,
           ),
         ),
         const VerticalDivider(width: 1),
-        Expanded(
-          child: IndexedStack(
-            index: selectedThread == null ? 0 : 1,
-            children: [
-              _ThreadListPane(
-                key: ValueKey(_forumPaneKey(selectedForum)),
-                forum: selectedForum,
-                cache: selectedForumListCache,
-                onSelectThread: onSelectThread,
-              ),
-              if (selectedThread == null)
-                const SizedBox.shrink()
-              else
-                _ThreadReaderPane(
-                  key: ValueKey('reader-${selectedThread!.threadId}'),
-                  thread: selectedThread!,
-                  cache: threadContentCaches.putIfAbsent(
-                    selectedThread!.threadId,
-                    JavBusThreadContentCache.new,
-                  ),
-                  onBackToList: onBackToList,
-                ),
-            ],
-          ),
-        ),
+        Expanded(child: rightPane),
       ],
+    );
+  }
+}
+
+/// 右侧空白引导页（无分区选中时显示）
+class _EmptyRightPane extends StatelessWidget {
+  const _EmptyRightPane({required this.forums});
+
+  final List<ForumForum> forums;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.forum_outlined,
+            size: 56,
+            color: theme.colorScheme.onSurfaceVariant.withAlpha(80),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            '选择左侧分区浏览帖子',
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '或使用搜索、收藏功能',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -162,24 +376,84 @@ class _CompactShell extends StatelessWidget {
     required this.forums,
     required this.selectedForum,
     required this.selectedThread,
+    required this.isSearchMode,
+    required this.isFavoritesMode,
+    required this.searchCache,
     required this.selectedForumListCache,
     required this.threadContentCaches,
     required this.onSelectForum,
     required this.onSelectThread,
+    required this.onToggleSearch,
+    required this.onToggleFavorites,
+    required this.onExitSearch,
+    required this.onExitFavorites,
     required this.onBackToList,
   });
 
   final List<ForumForum> forums;
-  final ForumForum selectedForum;
+  final ForumForum? selectedForum;
   final ForumThread? selectedThread;
-  final _ThreadListPaneCache selectedForumListCache;
+  final bool isSearchMode;
+  final bool isFavoritesMode;
+  final SearchPaneCache? searchCache;
+  final _ThreadListPaneCache? selectedForumListCache;
   final Map<int, JavBusThreadContentCache> threadContentCaches;
   final ValueChanged<ForumForum> onSelectForum;
   final ValueChanged<ForumThread> onSelectThread;
+  final VoidCallback onToggleSearch;
+  final VoidCallback onToggleFavorites;
+  final VoidCallback onExitSearch;
+  final VoidCallback onExitFavorites;
   final VoidCallback onBackToList;
 
   @override
   Widget build(BuildContext context) {
+    if (isSearchMode) {
+      return Column(
+        children: [
+          SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(4, 2, 16, 2),
+              child: Row(
+                children: [
+                  IconButton(
+                    tooltip: '返回版块列表',
+                    onPressed: onExitSearch,
+                    icon: const Icon(Icons.arrow_back_rounded),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(child: JavBusSearchPage(cache: searchCache!)),
+        ],
+      );
+    }
+    if (isFavoritesMode) {
+      return Column(
+        children: [
+          SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(4, 2, 16, 2),
+              child: Row(
+                children: [
+                  IconButton(
+                    tooltip: '返回版块列表',
+                    onPressed: onExitFavorites,
+                    icon: const Icon(Icons.arrow_back_rounded),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const Divider(height: 1),
+          const Expanded(child: _FavoritesPane()),
+        ],
+      );
+    }
     return IndexedStack(
       index: selectedThread == null ? 0 : 1,
       children: [
@@ -190,17 +464,28 @@ class _CompactShell extends StatelessWidget {
               child: _CompactForumBar(
                 forums: forums,
                 selectedForum: selectedForum,
+                isSearchMode: false,
+                isFavoritesMode: false,
                 onSelectForum: onSelectForum,
+                onToggleSearch: onToggleSearch,
+                onToggleFavorites: onToggleFavorites,
               ),
             ),
             const Divider(height: 1),
             Expanded(
-              child: _ThreadListPane(
-                key: ValueKey(_forumPaneKey(selectedForum)),
-                forum: selectedForum,
-                cache: selectedForumListCache,
-                onSelectThread: onSelectThread,
-              ),
+              child: () {
+                final forum = selectedForum;
+                final cache = selectedForumListCache;
+                if (forum != null && cache != null) {
+                  return _ThreadListPane(
+                    key: ValueKey(_forumPaneKey(forum)),
+                    forum: forum,
+                    cache: cache,
+                    onSelectThread: onSelectThread,
+                  );
+                }
+                return _EmptyRightPane(forums: forums);
+              }(),
             ),
           ],
         ),
@@ -225,12 +510,20 @@ class _ForumSidebar extends StatelessWidget {
   const _ForumSidebar({
     required this.forums,
     required this.selectedForum,
+    required this.isSearchMode,
+    required this.isFavoritesMode,
     required this.onSelectForum,
+    required this.onToggleSearch,
+    required this.onToggleFavorites,
   });
 
   final List<ForumForum> forums;
-  final ForumForum selectedForum;
+  final ForumForum? selectedForum;
+  final bool isSearchMode;
+  final bool isFavoritesMode;
   final ValueChanged<ForumForum> onSelectForum;
+  final VoidCallback onToggleSearch;
+  final VoidCallback onToggleFavorites;
 
   @override
   Widget build(BuildContext context) {
@@ -242,13 +535,13 @@ class _ForumSidebar extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 24, 20, 18),
+              padding: const EdgeInsets.fromLTRB(20, 24, 12, 18),
               child: Row(
                 children: [
                   ClipOval(
                     child: SizedBox(
-                      width: 44,
-                      height: 44,
+                      width: 40,
+                      height: 40,
                       child: ScalableImageWidget.fromSISource(
                         si: ScalableImageSource.fromSvg(
                           DefaultAssetBundle.of(context),
@@ -258,7 +551,7 @@ class _ForumSidebar extends StatelessWidget {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 10),
                   Expanded(
                     child: Text(
                       'JANUX DO',
@@ -268,6 +561,19 @@ class _ForumSidebar extends StatelessWidget {
                         fontWeight: FontWeight.w800,
                       ),
                     ),
+                  ),
+                  _SidebarIconButton(
+                    icon: Icons.search_rounded,
+                    selected: isSearchMode,
+                    onTap: onToggleSearch,
+                    tooltip: '搜索帖子',
+                  ),
+                  const SizedBox(width: 2),
+                  _SidebarIconButton(
+                    icon: Icons.star_rounded,
+                    selected: isFavoritesMode,
+                    onTap: onToggleFavorites,
+                    tooltip: '我的收藏',
                   ),
                 ],
               ),
@@ -281,7 +587,9 @@ class _ForumSidebar extends StatelessWidget {
                   final forum = forums[index];
                   return _ForumNavItem(
                     forum: forum,
-                    selected: _sameForum(forum, selectedForum),
+                    selected: !isSearchMode &&
+                        !isFavoritesMode &&
+                        _sameForum(forum, selectedForum),
                     onTap: () => onSelectForum(forum),
                   );
                 },
@@ -298,12 +606,20 @@ class _CompactForumBar extends StatelessWidget {
   const _CompactForumBar({
     required this.forums,
     required this.selectedForum,
+    required this.isSearchMode,
+    required this.isFavoritesMode,
     required this.onSelectForum,
+    required this.onToggleSearch,
+    required this.onToggleFavorites,
   });
 
   final List<ForumForum> forums;
-  final ForumForum selectedForum;
+  final ForumForum? selectedForum;
+  final bool isSearchMode;
+  final bool isFavoritesMode;
   final ValueChanged<ForumForum> onSelectForum;
+  final VoidCallback onToggleSearch;
+  final VoidCallback onToggleFavorites;
 
   @override
   Widget build(BuildContext context) {
@@ -312,13 +628,28 @@ class _CompactForumBar extends StatelessWidget {
       child: ListView.separated(
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
         scrollDirection: Axis.horizontal,
-        itemCount: forums.length,
+        itemCount: forums.length + 2, // +1 搜索 +1 收藏
         separatorBuilder: (_, _) => const SizedBox(width: 8),
         itemBuilder: (context, index) {
+          if (index == forums.length) {
+            return ChoiceChip(
+              label: const Text('搜索'),
+              selected: isSearchMode,
+              onSelected: (_) => onToggleSearch(),
+            );
+          }
+          if (index == forums.length + 1) {
+            return ChoiceChip(
+              label: const Text('收藏'),
+              selected: isFavoritesMode,
+              onSelected: (_) => onToggleFavorites(),
+            );
+          }
           final forum = forums[index];
           return ChoiceChip(
             label: Text(forum.name),
-            selected: _sameForum(forum, selectedForum),
+            selected: !isSearchMode && !isFavoritesMode &&
+                _sameForum(forum, selectedForum),
             onSelected: (_) => onSelectForum(forum),
           );
         },
@@ -397,6 +728,215 @@ class _ForumNavItem extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// 侧边栏顶部图标按钮（搜索 / 收藏）
+///
+/// 选中时显示主色调背景，hover 时显示浅背景。
+class _SidebarIconButton extends StatelessWidget {
+  const _SidebarIconButton({
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+    this.tooltip,
+  });
+
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+  final String? tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Tooltip(
+      message: tooltip ?? '',
+      child: Material(
+        color: selected
+            ? theme.colorScheme.primaryContainer.withValues(alpha: 0.68)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: Icon(
+              icon,
+              size: 20,
+              color: selected
+                  ? theme.colorScheme.onPrimaryContainer
+                  : theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 收藏帖子列表面板
+///
+/// 复用 ThreadRow 显示收藏的帖子，点击进入详情页。
+/// 列表页不显示返回按钮（与论坛主题列表页一致），
+/// 返回按钮仅出现在从收藏列表点进去的帖子详情页。
+class _FavoritesPane extends ConsumerWidget {
+  const _FavoritesPane();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final favorites = ref.watch(favoritesProvider);
+    final theme = Theme.of(context);
+
+    return Column(
+      children: [
+        SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 24, 24, 18),
+            child: Text(
+              favorites.isEmpty ? '我的收藏' : '我的收藏 (${favorites.length})',
+              style: theme.textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ),
+        const Divider(height: 1),
+        if (favorites.isEmpty)
+          Expanded(
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.star_outline_rounded,
+                    size: 48,
+                    color: theme.colorScheme.onSurfaceVariant.withAlpha(128),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    '暂无收藏',
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '浏览帖子时点击右上角星标即可收藏',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          )
+        else
+          Expanded(
+            child: Column(
+              children: [
+                const ThreadTableHeader(),
+                const Divider(height: 1),
+                Expanded(
+                  child: ListView.separated(
+                    padding: JavBusLayout.listPadding,
+                    itemCount: favorites.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final thread = favorites[index];
+                      return ThreadRow(
+                        thread: thread,
+                        views: thread.views,
+                        onTap: () => _openFavoriteThread(context, thread),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  void _openFavoriteThread(BuildContext context, ForumThread thread) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => JavBusThreadPage(
+          threadId: thread.threadId,
+          initialTitle: thread.title,
+        ),
+      ),
+    );
+  }
+}
+
+/// 收藏模式 Shell（论坛数据未加载或网络异常时使用）
+class _FavoritesShell extends StatelessWidget {
+  const _FavoritesShell({
+    required this.forums,
+    required this.isFavoritesMode,
+    required this.onToggleSearch,
+    required this.onToggleFavorites,
+    required this.onExitFavorites,
+  });
+
+  final List<ForumForum> forums;
+  final bool isFavoritesMode;
+  final VoidCallback onToggleSearch;
+  final VoidCallback onToggleFavorites;
+  final VoidCallback onExitFavorites;
+
+  @override
+  Widget build(BuildContext context) {
+    // 紧凑模式下显示收藏面板（带顶部返回按钮）
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < JavBusLayout.compactBreakpoint) {
+          return Column(
+            children: [
+              SafeArea(
+                bottom: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(4, 2, 16, 2),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        tooltip: '返回版块列表',
+                        onPressed: onExitFavorites,
+                        icon: const Icon(Icons.arrow_back_rounded),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const Divider(height: 1),
+              const Expanded(child: _FavoritesPane()),
+            ],
+          );
+        }
+        return Row(
+          children: [
+            SizedBox(
+              width: JavBusLayout.sidebarWidth,
+              child: _ForumSidebar(
+                forums: forums,
+                selectedForum: forums.isNotEmpty ? forums.first : const ForumForum(forumId: 0, name: ''),
+                isSearchMode: false,
+                isFavoritesMode: isFavoritesMode,
+                onSelectForum: (_) {},
+                onToggleSearch: onToggleSearch,
+                onToggleFavorites: onToggleFavorites,
+              ),
+            ),
+            const VerticalDivider(width: 1),
+            const Expanded(child: _FavoritesPane()),
+          ],
+        );
+      },
     );
   }
 }
@@ -629,7 +1169,7 @@ class _ThreadListPaneState extends ConsumerState<_ThreadListPane> {
               ? const _ShellEmptyState(message: '暂无帖子')
               : Column(
                   children: [
-                    const _ThreadTableHeader(),
+                    const ThreadTableHeader(),
                     const Divider(height: 1),
                     Expanded(
                       child: RefreshIndicator(
@@ -651,7 +1191,7 @@ class _ThreadListPaneState extends ConsumerState<_ThreadListPane> {
                               );
                             }
                             final thread = _threads[index];
-                            return _ThreadRow(
+                            return ThreadRow(
                               thread: thread,
                               onTap: () => widget.onSelectThread(thread),
                               views: _viewCounts[thread.threadId] ?? thread.views,
@@ -766,192 +1306,55 @@ class _SortBar extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
                 for (final (mode, label) in items)
-                  GestureDetector(
-                    onTap: () => onSelectSort(mode),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const SizedBox(height: 4),
-                        Text(
-                          label,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: mode == selectedSort
-                                ? theme.colorScheme.primary
-                                : theme.colorScheme.onSurfaceVariant,
-                            fontWeight: FontWeight.w400,
-                          ),
+                  Material(
+                    color: mode == selectedSort
+                        ? theme.colorScheme.primaryContainer
+                            .withValues(alpha: 0.68)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(6),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(6),
+                      onTap: () => onSelectSort(mode),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
                         ),
-                        const SizedBox(height: 3),
-                        AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          height: 2,
-                          width: mode == selectedSort ? 20 : 0,
-                          decoration: BoxDecoration(
-                            color: mode == selectedSort
-                                ? theme.colorScheme.primary
-                                : Colors.transparent,
-                            borderRadius: BorderRadius.circular(1),
-                          ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              label,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: mode == selectedSort
+                                    ? theme.colorScheme.onPrimaryContainer
+                                    : theme.colorScheme.onSurfaceVariant,
+                                fontWeight: mode == selectedSort
+                                    ? FontWeight.w700
+                                    : FontWeight.w400,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            AnimatedContainer(
+                              duration: const Duration(milliseconds: 200),
+                              height: 2,
+                              width: mode == selectedSort ? 20 : 0,
+                              decoration: BoxDecoration(
+                                color: mode == selectedSort
+                                    ? theme.colorScheme.onPrimaryContainer
+                                    : Colors.transparent,
+                                borderRadius: BorderRadius.circular(1),
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
                   ),
               ],
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _ThreadTableHeader extends StatelessWidget {
-  const _ThreadTableHeader();
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final labelStyle = theme.textTheme.bodyMedium?.copyWith(
-      color: theme.colorScheme.onSurfaceVariant,
-      fontWeight: FontWeight.w700,
-    );
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        JavBusLayout.listHorizontalPadding,
-        14,
-        JavBusLayout.listHorizontalPadding,
-        14,
-      ),
-      child: Row(
-        children: [
-          const SizedBox(width: 28),
-          const SizedBox(width: 18),
-          Expanded(child: Text('话题', style: labelStyle)),
-          const SizedBox(width: 18),
-          SizedBox(
-            width: JavBusLayout.topicViewsColumnWidth,
-            child: Text('浏览', textAlign: TextAlign.center, style: labelStyle),
-          ),
-          const SizedBox(width: 18),
-          SizedBox(
-            width: JavBusLayout.topicReplyColumnWidth,
-            child: Text('回复', textAlign: TextAlign.center, style: labelStyle),
-          ),
-          const SizedBox(width: 18),
-          SizedBox(
-            width: JavBusLayout.topicTimeColumnWidth,
-            child: Text('时间', textAlign: TextAlign.center, style: labelStyle),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ThreadRow extends StatelessWidget {
-  const _ThreadRow({
-    required this.thread,
-    required this.onTap,
-    this.views = 0,
-  });
-
-  final ForumThread thread;
-  final VoidCallback onTap;
-  final int views;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            SizedBox(
-              width: 28,
-              child: Icon(
-                thread.isPinned
-                    ? Icons.push_pin_rounded
-                    : thread.hasAttachment
-                    ? Icons.attach_file_rounded
-                    : Icons.chat_bubble_outline_rounded,
-                size: 18,
-                color: thread.isPinned
-                    ? theme.colorScheme.primary
-                    : theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(width: 18),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    thread.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 4,
-                    children: [
-                      _MutedMeta(
-                        icon: Icons.person_outline_rounded,
-                        label: thread.author,
-                      ),
-                      if (thread.isPinned) const _SmallBadge(label: '置顶'),
-                      if (thread.isDigest) const _SmallBadge(label: '精华'),
-                      if (thread.hasAttachment) const _SmallBadge(label: '附件'),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 18),
-            SizedBox(
-              width: JavBusLayout.topicViewsColumnWidth,
-              child: Text(
-                _formatCount(views),
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-            const SizedBox(width: 18),
-            SizedBox(
-              width: JavBusLayout.topicReplyColumnWidth,
-              child: Text(
-                _formatCount(thread.replies),
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-            const SizedBox(width: 18),
-            SizedBox(
-              width: JavBusLayout.topicTimeColumnWidth,
-              child: Text(
-                _formatThreadTime(thread.createdAt),
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                  fontWeight: FontWeight.w600,
-                  height: 1.35,
-                ),
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -997,6 +1400,24 @@ class _ThreadReaderPane extends StatelessWidget {
                     ),
                   ),
                 ),
+                Consumer(
+                  builder: (context, ref, _) {
+                    final isFav = ref.watch(
+                      isFavoritedProvider(thread.threadId),
+                    );
+                    return IconButton(
+                      tooltip: isFav ? '取消收藏' : '收藏帖子',
+                      onPressed: () =>
+                          ref.read(favoritesProvider.notifier).toggle(thread),
+                      icon: Icon(
+                        isFav
+                            ? Icons.star_rounded
+                            : Icons.star_outline_rounded,
+                        color: isFav ? Colors.amber : null,
+                      ),
+                    );
+                  },
+                ),
               ],
             ),
           ),
@@ -1011,57 +1432,6 @@ class _ThreadReaderPane extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _MutedMeta extends StatelessWidget {
-  const _MutedMeta({required this.icon, required this.label});
-
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 14, color: theme.colorScheme.onSurfaceVariant),
-        const SizedBox(width: 4),
-        Text(
-          label,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _SmallBadge extends StatelessWidget {
-  const _SmallBadge({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        child: Text(
-          label,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ),
     );
   }
 }
@@ -1134,7 +1504,8 @@ class _ShellEmptyState extends StatelessWidget {
   }
 }
 
-bool _sameForum(ForumForum a, ForumForum b) {
+bool _sameForum(ForumForum? a, ForumForum? b) {
+  if (a == null || b == null) return false;
   return a.forumId == b.forumId && a.filterTypeId == b.filterTypeId;
 }
 
@@ -1156,30 +1527,4 @@ String _forumSubtitle(ForumForum forum) {
   return forum.description?.trim() ?? '';
 }
 
-String _formatCount(int value) {
-  if (value <= 0) return '-';
-  if (value >= 10000) return '${(value / 10000).toStringAsFixed(1)}万';
-  if (value >= 1000) return '${(value / 1000).toStringAsFixed(1)}k';
-  return '$value';
-}
-
-String _formatThreadTime(DateTime? value) {
-  if (value == null) return '';
-  final now = DateTime.now();
-  final diff = now.difference(value);
-
-  // 1周内使用相对时间
-  if (diff.inDays < 7) {
-    if (diff.inSeconds < 60) return '刚刚';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}分钟前';
-    if (diff.inHours < 24) return '${diff.inHours}小时前';
-    return '${diff.inDays}天前';
-  }
-
-  // 超过1周显示日期
-  String two(int input) => input.toString().padLeft(2, '0');
-  return value.year == now.year
-      ? '${two(value.month)} 月 ${two(value.day)} 日'
-      : '${two(value.year % 100)} 年 ${two(value.month)} 月 ${two(value.day)} 日';
-}
 

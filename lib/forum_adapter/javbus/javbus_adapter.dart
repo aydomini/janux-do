@@ -1,6 +1,8 @@
+import 'dart:io' show Platform;
 import 'dart:math';
 
 import 'package:dio/dio.dart';
+import 'package:native_dio_adapter/native_dio_adapter.dart';
 
 import '../../constants.dart';
 import '../../forum_adapter/adapter.dart';
@@ -12,6 +14,7 @@ import '../../services/network/cookie/cookie_jar_service.dart';
 import 'api_mapper.dart';
 import 'parsers/forumdisplay_parser.dart';
 import 'parsers/forumindex_parser.dart';
+import 'parsers/search_parser.dart';
 import 'parsers/post_html_cleaner.dart';
 import 'parsers/viewthread_parser.dart';
 import 'utils/time_parser.dart';
@@ -23,11 +26,7 @@ class JavbusAdapter extends ForumAdapter {
     JavBusApiMapper? apiMapper,
     JavBusUrlBuilder urlBuilder = const JavBusUrlBuilder(),
     DiscuzTimeParser? timeParser,
-  }) : _dio = dio ??
-           Dio(BaseOptions(
-             connectTimeout: const Duration(seconds: 15),
-             receiveTimeout: const Duration(seconds: 30),
-           )),
+  }) : _dio = dio ?? _createDio(),
        _apiMapper = apiMapper ?? JavBusApiMapper(urlBuilder: urlBuilder),
        _forumIndexParser = ForumIndexParser(urlBuilder: urlBuilder),
        _forumDisplayParser = ForumDisplayParser(
@@ -38,13 +37,31 @@ class JavbusAdapter extends ForumAdapter {
          urlBuilder: urlBuilder,
          timeParser: timeParser,
          htmlCleaner: PostHtmlCleaner(urlBuilder: urlBuilder),
+       ),
+       _searchParser = SearchParser(
+         urlBuilder: urlBuilder,
+         timeParser: timeParser,
        );
+
+  /// 创建 Dio 实例，macOS 上使用原生 NSURLSession 适配器以兼容系统网络栈。
+  static Dio _createDio() {
+    final dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 15),
+      sendTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 30),
+    ));
+    if (Platform.isMacOS) {
+      dio.httpClientAdapter = NativeAdapter();
+    }
+    return dio;
+  }
 
   final Dio _dio;
   final JavBusApiMapper _apiMapper;
   final ForumIndexParser _forumIndexParser;
   final ForumDisplayParser _forumDisplayParser;
   final ViewThreadParser _viewThreadParser;
+  final SearchParser _searchParser;
   final Map<String, String> _cookies = {};
   String? _lastDesktopReferer; // 跟踪上一次桌面版请求 URL，作为 Referer
 
@@ -174,6 +191,46 @@ class JavbusAdapter extends ForumAdapter {
       hasNextPage: result.hasNextPage,
       viewCounts: viewCounts,
     );
+  }
+
+  @override
+  Future<SearchResult> search(String keyword,
+      {int? searchId, int page = 1}) async {
+    final Uri uri;
+    if (searchId != null) {
+      uri = _apiMapper.searchForumPage(
+        searchId: searchId,
+        keyword: keyword,
+        page: page,
+      );
+    } else {
+      uri = _apiMapper.searchForum(keyword: keyword);
+    }
+    final html = await _getHtml(
+      uri,
+      userAgent: desktopUserAgent,
+      referer: _lastDesktopReferer,
+      browserNavigation: true,
+    );
+    _lastDesktopReferer = uri.toString();
+
+    // 检测 60 秒频率限制
+    if (_isSearchRateLimited(html)) {
+      throw ForumResponseException(
+        '搜索频率限制：60 秒内只能进行一次搜索',
+        requestUrl: uri.toString(),
+        statusCode: 200,
+        responseSnippet: _snippet(html),
+      );
+    }
+
+    return _searchParser.parse(html, requestUrl: uri.toString());
+  }
+
+  /// 检测 Discuz 搜索频率限制页面
+  static bool _isSearchRateLimited(String html) {
+    return html.contains('60 秒內只能進行一次搜索') ||
+        html.contains('60 秒内只能进行一次搜索');
   }
 
   @override

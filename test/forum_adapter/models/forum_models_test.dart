@@ -36,6 +36,12 @@ class _UnsupportedAdapter extends ForumAdapter {
       threadTitle: '',
     );
   }
+
+  @override
+  Future<SearchResult> search(String keyword,
+      {int? searchId, int page = 1}) async {
+    throw const UnsupportedForumFeatureException('搜索功能将在后续阶段实现');
+  }
 }
 
 void main() {

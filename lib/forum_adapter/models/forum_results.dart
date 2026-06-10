@@ -24,6 +24,26 @@ class ThreadListResult {
   final Map<int, int>? viewCounts; // tid → views，来自桌面版 HTML
 }
 
+class SearchResult {
+  const SearchResult({
+    required this.threads,
+    required this.currentPage,
+    required this.totalPages,
+    required this.hasNextPage,
+    this.totalResults = 0,
+    this.matchedKeyword,
+    this.searchId,
+  });
+
+  final List<ForumThread> threads;
+  final int currentPage;
+  final int totalPages;
+  final bool hasNextPage;
+  final int totalResults;
+  final String? matchedKeyword;
+  final int? searchId;
+}
+
 class PostListResult {
   const PostListResult({
     required this.posts,

@@ -7,6 +7,8 @@ import 'package:html/dom.dart' as dom;
 
 import '../../forum_adapter/javbus/utils/url_builder.dart';
 import '../../forum_adapter/models/forum_post.dart';
+import '../../forum_adapter/models/forum_thread.dart';
+import '../../providers/favorites_provider.dart';
 import '../../providers/forum_provider.dart';
 import '../../services/highlighter_service.dart';
 import '../../services/javbus_cache_manager.dart';
@@ -39,8 +41,23 @@ class JavBusThreadPage extends ConsumerStatefulWidget {
 class _JavBusThreadPageState extends ConsumerState<JavBusThreadPage> {
   @override
   Widget build(BuildContext context) {
+    final isFav = ref.watch(isFavoritedProvider(widget.threadId));
     return Scaffold(
-      appBar: AppBar(title: Text(widget.initialTitle)),
+      appBar: AppBar(
+        title: Text(widget.initialTitle),
+        actions: [
+          _FavoriteButton(
+            thread: ForumThread(
+              threadId: widget.threadId,
+              forumId: 0,
+              title: widget.initialTitle,
+              author: '',
+            ),
+            isFavorited: isFav,
+            compact: true,
+          ),
+        ],
+      ),
       body: JavBusThreadContent(
         key: ValueKey('javbus-thread-content-${widget.threadId}'),
         threadId: widget.threadId,
@@ -1551,6 +1568,34 @@ class _LoadMoreFooter extends StatelessWidget {
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),
+      ),
+    );
+  }
+}
+
+/// 收藏按钮
+///
+/// 详情页标题栏中使用。支持紧凑模式（AppBar action）和普通模式（独立行内）。
+class _FavoriteButton extends ConsumerWidget {
+  const _FavoriteButton({
+    required this.thread,
+    required this.isFavorited,
+    this.compact = false,
+  });
+
+  final ForumThread thread;
+  final bool isFavorited;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return IconButton(
+      tooltip: isFavorited ? '取消收藏' : '收藏帖子',
+      onPressed: () => ref.read(favoritesProvider.notifier).toggle(thread),
+      icon: Icon(
+        isFavorited ? Icons.star_rounded : Icons.star_outline_rounded,
+        color: isFavorited ? Colors.amber : null,
+        size: compact ? 22 : null,
       ),
     );
   }

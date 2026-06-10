@@ -17,6 +17,12 @@ abstract class ForumAdapter {
 
   Future<PostListResult> getPosts({required int threadId, int page = 1});
 
+  /// 论坛帖子搜索（匿名可用，60 秒冷却）
+  ///
+  /// 首次搜索不传 [searchId]，Discuz 分配 searchid 后通过
+  /// [SearchResult.searchId] 返回，用于后续翻页。
+  Future<SearchResult> search(String keyword, {int? searchId, int page = 1});
+
   /// 获取楼中楼点评（从桌面版 HTML 解析 pstl 块）
   Future<Map<int, List<ForumComment>>> getComments(int threadId, {int page = 1}) async {
     return {};

@@ -26,7 +26,10 @@ void main() {
       expect(result.threads.first.replies, 2);
       expect(result.threads.first.views, 30);
       expect(result.threads.first.createdAt, DateTime(2026, 6, 7, 14, 30));
+      expect(result.threads.first.lastReplyAt, DateTime(2026, 6, 8, 9, 30));
       expect(result.threads.last.isPinned, isFalse);
+      expect(result.threads.last.createdAt, DateTime(2026, 6, 7, 10, 0));
+      expect(result.threads.last.lastReplyAt, DateTime(2026, 6, 8, 11, 18));
       expect(result.currentPage, 1);
       expect(result.totalPages, 2);
       expect(result.hasNextPage, isTrue);
