@@ -29,21 +29,9 @@ class JavBusUrlBuilder {
       return Uri.parse('https://$trimmed').toString();
     }
 
-    final relative = trimmed.startsWith('/')
-        ? _stripBasePathPrefix(trimmed.substring(1))
-        : trimmed;
-    return baseUri.resolve(relative).toString();
-  }
-
-  String _stripBasePathPrefix(String path) {
-    final basePath = baseUri.path;
-    final normalizedBase = basePath.startsWith('/')
-        ? basePath.substring(1)
-        : basePath;
-    if (path.startsWith(normalizedBase)) {
-      return path.substring(normalizedBase.length);
-    }
-    return path;
+    // Dart Uri.resolve 对以 / 开头的绝对路径会正确替换整个 path，
+    // 对相对路径会自然追加到 base path 后面，无需手动剥离前缀
+    return baseUri.resolve(trimmed).toString();
   }
 
   /// UC 头像域名（从桌面版页面 HTML 中自动检测）
