@@ -141,6 +141,53 @@ class JavbusAdapter extends ForumAdapter {
     return html;
   }
 
+  /// 启动阶段预热：校验 Cookie 有效性并建立会话。
+  ///
+  /// 应用重启时论坛列表从缓存加载（跳过 _warmUp），但 Cookie 可能已过期。
+  /// 此方法在 [main] 启动阶段非阻塞调用，提前发现问题并重试，
+  /// 避免用户点击分区后才被动报错。
+  ///
+  /// 返回 true 表示会话就绪，false 表示网络不可达或服务端异常。
+  @override
+  Future<bool> warmUpSession() async {
+    // 先尝试从 CookieJar 恢复持久化 Cookie（含 session、cf_clearance 等）
+    await _initCookies(_apiMapper.siteHome());
+    // 确保年龄验证 Cookie 存在（可能被 _initCookies 加载，也可能全新）
+    _cookies['existmag'] = 'all';
+    _cookies['age'] = 'verified';
+    _syncToCookieJar();
+
+    try {
+      // 轻量请求：访问主站首页验证 Cookie 是否仍有效
+      final siteHomeUri = _apiMapper.siteHome();
+      await _getHtml(
+        siteHomeUri,
+        userAgent: desktopUserAgent,
+        browserNavigation: true,
+      );
+      _lastDesktopReferer = siteHomeUri.toString();
+      return true;
+    } on ForumException {
+      // 年龄验证页或登录页 → Cookie 失效，清空后重试
+      _cookies.clear();
+      _cookies['existmag'] = 'all';
+      _cookies['age'] = 'verified';
+      _syncToCookieJar();
+      try {
+        await _getHtml(
+          _apiMapper.siteHome(),
+          userAgent: desktopUserAgent,
+          browserNavigation: true,
+        );
+        return true;
+      } catch (_) {
+        return false;
+      }
+    } on DioException {
+      return false; // 网络不可达
+    }
+  }
+
   @override
   Future<List<ForumForum>> getForums() async {
     var restoreCookies = true;

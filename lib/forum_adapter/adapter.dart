@@ -46,4 +46,10 @@ abstract class ForumAdapter {
   Future<void> reply({required int threadId, required String content}) async {
     throw const UnsupportedForumFeatureException('回复功能将在后续阶段实现');
   }
+
+  /// 启动阶段预热：校验 Cookie 有效性并建立会话。
+  ///
+  /// 返回 true 表示会话就绪。默认实现返回 true，
+  /// 子类可按需覆盖执行实际网络预热。
+  Future<bool> warmUpSession() async => true;
 }

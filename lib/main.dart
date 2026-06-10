@@ -19,6 +19,7 @@ import 'services/favorites_service.dart';
 import 'services/forum_cache_service.dart';
 import 'services/javbus_cache_manager.dart';
 import 'l10n/s.dart';
+import 'forum_adapter/javbus/javbus_adapter.dart';
 
 import 'services/network/rhttp/rhttp_settings_service.dart';
 import 'package:rhttp/rhttp.dart' as rhttp;
@@ -138,6 +139,14 @@ Future<void> main() async {
 
   // 启动网络状态持续监听，macOS 重启后 WiFi 就绪时自动触发刷新
   ConnectivityService().init();
+
+  // 启动阶段预热：非阻塞校验 Cookie/Session 有效性。
+  // 论坛列表可能从缓存加载而跳过 _warmUp，但 Cookie 可能已过期。
+  // 提前发现问题并自动修复，避免用户点击分区后才被动报错。
+  final warmupAdapter = JavbusAdapter();
+  unawaited(warmupAdapter.warmUpSession().then((ok) {
+    if (!ok) debugPrint('[Main] Session warmup failed, will retry on first request');
+  }));
 
   // 初始化下载服务
   DownloadService().initialize();
