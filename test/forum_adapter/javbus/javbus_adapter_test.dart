@@ -116,7 +116,7 @@ void main() {
       );
       expect(
         fixtureAdapter.requests.last.headers['Cookie'],
-        'bus_session=abc123',
+        'existmag=all; age=verified; bus_session=abc123',
       );
     });
 

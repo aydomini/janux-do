@@ -37,7 +37,7 @@ class _JavBusShellPageState extends ConsumerState<JavBusShellPage> {
     setState(() {
       // 搜索/收藏模式下点击分区总是切换选中（用户明确意图），不执行取消逻辑
       final isSpecialMode = _isSearchMode || _isFavoritesMode;
-      if (!isSpecialMode && _selectedForum?.forumId == forum.forumId) {
+      if (!isSpecialMode && _sameForum(_selectedForum, forum)) {
         _selectedForum = null;
       } else {
         _selectedForum = forum;
@@ -121,6 +121,7 @@ class _JavBusShellPageState extends ConsumerState<JavBusShellPage> {
             onToggleSearch: _toggleSearchMode,
             onToggleFavorites: _toggleFavoritesMode,
             onExitFavorites: _exitFavoritesMode,
+            onSelectForum: _selectForum,
             onSelectThread: _selectThread,
           ),
           error: (_, _) => _FavoritesShell(
@@ -129,6 +130,7 @@ class _JavBusShellPageState extends ConsumerState<JavBusShellPage> {
             onToggleSearch: _toggleSearchMode,
             onToggleFavorites: _toggleFavoritesMode,
             onExitFavorites: _exitFavoritesMode,
+            onSelectForum: _selectForum,
             onSelectThread: _selectThread,
           ),
           data: (forums) => _FavoritesShell(
@@ -137,6 +139,7 @@ class _JavBusShellPageState extends ConsumerState<JavBusShellPage> {
             onToggleSearch: _toggleSearchMode,
             onToggleFavorites: _toggleFavoritesMode,
             onExitFavorites: _exitFavoritesMode,
+            onSelectForum: _selectForum,
             onSelectThread: _selectThread,
           ),
         ),
@@ -900,6 +903,7 @@ class _FavoritesShell extends StatelessWidget {
     required this.onToggleSearch,
     required this.onToggleFavorites,
     required this.onExitFavorites,
+    required this.onSelectForum,
     this.onSelectThread,
   });
 
@@ -908,6 +912,7 @@ class _FavoritesShell extends StatelessWidget {
   final VoidCallback onToggleSearch;
   final VoidCallback onToggleFavorites;
   final VoidCallback onExitFavorites;
+  final ValueChanged<ForumForum> onSelectForum;
   final ValueChanged<ForumThread>? onSelectThread;
 
   @override
@@ -947,7 +952,7 @@ class _FavoritesShell extends StatelessWidget {
                 selectedForum: forums.isNotEmpty ? forums.first : const ForumForum(forumId: 0, name: ''),
                 isSearchMode: false,
                 isFavoritesMode: isFavoritesMode,
-                onSelectForum: (_) {},
+                onSelectForum: onSelectForum,
                 onToggleSearch: onToggleSearch,
                 onToggleFavorites: onToggleFavorites,
               ),

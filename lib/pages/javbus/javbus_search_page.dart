@@ -326,24 +326,46 @@ class _JavBusSearchPageState extends ConsumerState<JavBusSearchPage> {
 
     return Column(
       children: [
-        _SearchBar(
-          controller: _searchController,
-          focusNode: _searchFocus,
-          cooldownSeconds: _cooldownSeconds,
-          isSearching: _isSearching,
-          onSubmit: () => _doSearch(),
-          onClear: _clearSearch,
-        ),
-        if (showHistory)
-          _SearchHistoryDropdown(
-            items: _searchHistory,
-            onTap: (kw) => _doSearch(keyword: kw),
-            onDelete: (kw) async {
-              await SearchHistory.remove(kw);
-              _searchHistory = await SearchHistory.load();
-              if (mounted) setState(() {});
-            },
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            JavBusLayout.listHorizontalPadding,
+            24,
+            JavBusLayout.listHorizontalPadding,
+            16,
           ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _SearchBar(
+                controller: _searchController,
+                focusNode: _searchFocus,
+                cooldownSeconds: _cooldownSeconds,
+                isSearching: _isSearching,
+                onSubmit: () => _doSearch(),
+                onClear: _clearSearch,
+              ),
+              if (showHistory)
+                Row(
+                  children: [
+                    Expanded(
+                      child: _SearchHistoryDropdown(
+                        items: _searchHistory,
+                        onTap: (kw) => _doSearch(keyword: kw),
+                        onDelete: (kw) async {
+                          await SearchHistory.remove(kw);
+                          _searchHistory = await SearchHistory.load();
+                          if (mounted) setState(() {});
+                        },
+                      ),
+                    ),
+                    // 对齐搜索框右侧的间距(14px) + 搜索按钮(40px)
+                    const SizedBox(width: 54),
+                  ],
+                ),
+            ],
+          ),
+        ),
         if (!showHistory && !isInitial) ...[
           const Divider(height: 1),
           if (_totalResults > 0)
@@ -430,14 +452,7 @@ class _SearchBar extends StatelessWidget {
     final theme = Theme.of(context);
     final canSearch = !isSearching && cooldownSeconds == 0;
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        JavBusLayout.listHorizontalPadding,
-        24,
-        JavBusLayout.listHorizontalPadding,
-        16,
-      ),
-      child: Row(
+    return Row(
         children: [
           Expanded(
             child: TextField(
@@ -468,7 +483,7 @@ class _SearchBar extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 14),
           cooldownSeconds > 0
               ? SizedBox(
                   width: 64,
@@ -496,8 +511,7 @@ class _SearchBar extends StatelessWidget {
                       icon: const Icon(Icons.search_rounded),
                     ),
         ],
-      ),
-    );
+      );
   }
 }
 
@@ -516,11 +530,7 @@ class _SearchHistoryDropdown extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: JavBusLayout.listHorizontalPadding,
-      ),
-      child: Material(
+    return Material(
         elevation: 3,
         borderRadius: const BorderRadius.vertical(
           bottom: Radius.circular(12),
@@ -567,8 +577,7 @@ class _SearchHistoryDropdown extends StatelessWidget {
             ),
           ),
         ),
-      ),
-    );
+      );
   }
 }
 

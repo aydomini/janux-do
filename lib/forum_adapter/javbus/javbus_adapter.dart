@@ -110,6 +110,15 @@ class JavbusAdapter extends ForumAdapter {
   Future<String> _warmUp({bool restoreCookies = true}) async {
     final siteHomeUri = _apiMapper.siteHome();
     if (restoreCookies) await _initCookies(siteHomeUri);
+    // 全新安装无 Cookie 时程序化设置年龄验证 Cookie
+    // 这些 Cookie 是 JavBus 年龄验证网关的通行证，服务器接受程序化设置
+    if (!_cookies.containsKey('existmag') || _cookies['existmag'] != 'all') {
+      _cookies['existmag'] = 'all';
+    }
+    if (!_cookies.containsKey('age') || _cookies['age'] != 'verified') {
+      _cookies['age'] = 'verified';
+    }
+    _syncToCookieJar();
     await _getHtml(
       siteHomeUri,
       userAgent: desktopUserAgent,
@@ -344,6 +353,13 @@ class JavbusAdapter extends ForumAdapter {
           continue;
         }
         _throwForumNetworkError(uri, error);
+      } on ForumResponseException catch (_) {
+        // 登录页检测已自动设置 Cookie，重试一次
+        if (attempt < 1) {
+          await Future.delayed(const Duration(milliseconds: 300));
+          continue;
+        }
+        rethrow;
       }
     }
     _throwForumNetworkError(uri, lastTransientError!);
@@ -414,6 +430,18 @@ class JavbusAdapter extends ForumAdapter {
           responseSnippet: _snippet(body),
         );
       }
+      if (_isLoginPage(body)) {
+        // 无 Cookie 时论坛页面 302 重定向到登录页，说明年龄验证 Cookie 缺失
+        _cookies['existmag'] = 'all';
+        _cookies['age'] = 'verified';
+        _syncToCookieJar();
+        throw ForumResponseException(
+          'JavBus 重定向到登录页（年龄验证 Cookie 缺失），已自动设置 Cookie，请重试',
+          requestUrl: uri.toString(),
+          statusCode: statusCode,
+          responseSnippet: _snippet(body),
+        );
+      }
       return body;
     } on ForumException {
       rethrow;
@@ -458,6 +486,13 @@ class JavbusAdapter extends ForumAdapter {
     return html.contains('Age Verification JavBus') ||
         html.contains('你是否已經成年') ||
         html.contains('/doc/driver-verify');
+  }
+
+  /// 无 Cookie 访问论坛页面时被 302 重定向到登录页
+  static bool _isLoginPage(String html) {
+    return (html.contains('member.php?mod=logging') ||
+            html.contains('member.php?mod=logging&amp;')) &&
+        html.contains('action=login');
   }
 
   /// 判断两个 URL 是否同源（scheme + host 一致）
