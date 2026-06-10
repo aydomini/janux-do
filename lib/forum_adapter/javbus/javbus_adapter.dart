@@ -1,8 +1,6 @@
-import 'dart:io' show Platform;
 import 'dart:math';
 
 import 'package:dio/dio.dart';
-import 'package:native_dio_adapter/native_dio_adapter.dart';
 
 import '../../constants.dart';
 import '../../forum_adapter/adapter.dart';
@@ -43,16 +41,17 @@ class JavbusAdapter extends ForumAdapter {
          timeParser: timeParser,
        );
 
-  /// 创建 Dio 实例，macOS 上使用原生 NSURLSession 适配器以兼容系统网络栈。
+  /// 创建 Dio 实例。
+  ///
+  /// 注意：不使用 NativeAdapter（NSURLSession），因为 NSURLSession 会剥离
+  /// 自定义 Cookie 请求头，导致年龄验证 Cookie 无法发送到 JavBus 服务器。
+  /// Dart 原生 HttpClient 适配器正确处理自定义 Cookie 头。
   static Dio _createDio() {
     final dio = Dio(BaseOptions(
       connectTimeout: const Duration(seconds: 15),
       sendTimeout: const Duration(seconds: 15),
       receiveTimeout: const Duration(seconds: 30),
     ));
-    if (Platform.isMacOS) {
-      dio.httpClientAdapter = NativeAdapter();
-    }
     return dio;
   }
 
@@ -401,9 +400,30 @@ class JavbusAdapter extends ForumAdapter {
         }
         _throwForumNetworkError(uri, error);
       } on ForumResponseException catch (_) {
-        // 登录页检测已自动设置 Cookie，重试一次
-        if (attempt < 1) {
-          await Future.delayed(const Duration(milliseconds: 300));
+        // 登录页/年龄验证页检测：Cookie 失效或缺失
+        if (attempt == 0) {
+          // 第 1 次失败：_getHtmlOnce 已自动设置 Cookie，等待后重试
+          await Future.delayed(const Duration(milliseconds: 500));
+          continue;
+        }
+        if (attempt == 1) {
+          // 第 2 次失败：Cookie 可能彻底失效，清空后访问主站重新建立会话
+          _cookies.clear();
+          _cookies['existmag'] = 'all';
+          _cookies['age'] = 'verified';
+          _syncToCookieJar();
+          try {
+            final siteHomeUri = _apiMapper.siteHome();
+            await _getHtmlOnce(
+              siteHomeUri,
+              userAgent: desktopUserAgent,
+              browserNavigation: true,
+            );
+            _lastDesktopReferer = siteHomeUri.toString();
+          } catch (_) {
+            // 主站也失败，网络可能不可达，继续尝试原请求
+          }
+          await Future.delayed(const Duration(milliseconds: 800));
           continue;
         }
         rethrow;
