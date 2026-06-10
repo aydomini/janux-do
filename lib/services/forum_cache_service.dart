@@ -40,6 +40,13 @@ class ForumCacheService {
     _loaded = true;
   }
 
+  /// 清空缓存状态（仅用于测试清理）
+  void clearForTest() {
+    _cached = [];
+    _loaded = false;
+    _prefs = null;
+  }
+
   /// 是否有缓存数据
   bool get hasCache => _cached.isNotEmpty;
 

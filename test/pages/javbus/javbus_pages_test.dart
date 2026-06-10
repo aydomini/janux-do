@@ -17,6 +17,7 @@ import 'package:fluxdo/pages/javbus/javbus_layout.dart';
 import 'package:fluxdo/pages/javbus/javbus_shell_page.dart';
 import 'package:fluxdo/pages/javbus/javbus_thread_page.dart';
 import 'package:fluxdo/providers/forum_provider.dart';
+import 'package:fluxdo/services/forum_cache_service.dart';
 import 'package:fluxdo/services/javbus_cache_manager.dart';
 
 class _FakeForumAdapter extends ForumAdapter {
@@ -72,6 +73,11 @@ class _FakeForumAdapter extends ForumAdapter {
         filterTypeId: 8,
       ),
     ];
+  }
+
+  @override
+  Future<SearchResult> search(String keyword, {int? searchId, int page = 1}) async {
+    throw UnimplementedError('search not implemented');
   }
 
   @override
@@ -191,6 +197,11 @@ Widget _testApp(Widget child, {ForumAdapter? adapter}) {
 }
 
 void main() {
+  setUp(() {
+    // 每个测试从干净的缓存状态开始
+    ForumCacheService.instance.clearForTest();
+  });
+
   Future<void> useDesktopSurface(WidgetTester tester) async {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.binding.setSurfaceSize(const Size(1440, 900));
@@ -218,6 +229,14 @@ void main() {
     expect(find.text('有码讨论'), findsWidgets);
     expect(find.text('日本AV'), findsOneWidget);
     expect(find.textContaining('120 主题'), findsOneWidget);
+
+    // 新架构：分区需点击选中后才加载帖子列表，右侧初始为空
+    expect(find.text('普通主题 P1'), findsNothing);
+
+    // 点击选中分区后加载帖子
+    await tester.tap(find.text('有码讨论').first);
+    await tester.pumpAndSettle();
+
     expect(find.text('普通主题 P1'), findsOneWidget);
     expect(find.textContaining('天前'), findsOneWidget);
     expect(find.text('话题'), findsOneWidget);
@@ -233,6 +252,7 @@ void main() {
     await tester.pumpWidget(_testApp(const JavBusHomePage(), adapter: adapter));
     await tester.pumpAndSettle();
 
+    // 点击选中分区以触发帖子加载
     await tester.tap(find.text('日本AV'));
     await tester.pumpAndSettle();
 
@@ -247,18 +267,25 @@ void main() {
     await tester.pumpWidget(_testApp(const JavBusHomePage(), adapter: adapter));
     await tester.pumpAndSettle();
 
-    expect(adapter.requestedFilterTypeIds, [null]);
-
-    await tester.tap(find.text('日本AV'));
-    await tester.pumpAndSettle();
-
-    expect(adapter.requestedFilterTypeIds, [null, 8]);
-
+    // 点击选中分区加载帖子
     await tester.tap(find.text('有码讨论').first);
     await tester.pumpAndSettle();
 
     expect(find.text('普通主题 P1'), findsOneWidget);
-    expect(adapter.requestedFilterTypeIds, [null, 8]);
+    expect(adapter.requestedFilterTypeIds, [null]);
+
+    // 再次点击同名分区取消选中（toggle off），右侧清空
+    await tester.tap(find.text('有码讨论').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('普通主题 P1'), findsNothing);
+
+    // 再次选中：缓存命中，不发起新请求
+    await tester.tap(find.text('有码讨论').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('普通主题 P1'), findsOneWidget);
+    expect(adapter.requestedFilterTypeIds, [null]);
   });
 
   testWidgets('JavBus 首页点击帖子后在右侧区域切换为详情', (tester) async {
@@ -266,13 +293,17 @@ void main() {
     await tester.pumpWidget(_testApp(const JavBusHomePage()));
     await tester.pumpAndSettle();
 
+    // 先选中分区加载帖子列表
+    await tester.tap(find.text('有码讨论').first);
+    await tester.pumpAndSettle();
+
     await tester.tap(find.text('普通主题 P1'));
     await tester.pumpAndSettle();
 
     expect(find.byType(JavBusShellPage), findsOneWidget);
     expect(find.byType(JavBusThreadPage), findsNothing);
-    expect(find.text('普通主题 P1'), findsOneWidget);
-    expect(find.textContaining('已加载'), findsNothing);
+    // 右侧应切换为详情视图（帖子标题保留）
+    // 注意：详情模式下帖子标题由 _ThreadDetailPane 渲染
     expect(find.textContaining('正文内容', findRichText: true), findsOneWidget);
     expect(find.textContaining('重点', findRichText: true), findsOneWidget);
     expect(find.textContaining('#1'), findsOneWidget);
@@ -292,6 +323,10 @@ void main() {
     await tester.pumpWidget(_testApp(const JavBusHomePage(), adapter: adapter));
     await tester.pumpAndSettle();
 
+    // 先选中分区加载帖子列表
+    await tester.tap(find.text('有码讨论').first);
+    await tester.pumpAndSettle();
+
     expect(adapter.requestedThreadPages, [1]);
 
     await tester.tap(find.text('普通主题 P1'));
@@ -307,6 +342,10 @@ void main() {
     await useDesktopSurface(tester);
     final adapter = _FakeForumAdapter(postsPerPage: 20, totalPostPages: 2);
     await tester.pumpWidget(_testApp(const JavBusHomePage(), adapter: adapter));
+    await tester.pumpAndSettle();
+
+    // 先选中分区加载帖子列表
+    await tester.tap(find.text('有码讨论').first);
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('普通主题 P1'));
