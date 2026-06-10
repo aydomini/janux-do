@@ -226,12 +226,14 @@ class JavbusAdapter extends ForumAdapter {
   @override
   Future<PostListResult> getPosts({required int threadId, int page = 1}) async {
     await _ensureSessionWarm();
-    final uri = _apiMapper.viewThread(tid: threadId, page: page);
+    final uri = _apiMapper.desktopViewThread(tid: threadId, page: page);
     final html = await _getHtml(
       uri,
-      userAgent: mobileUserAgent,
+      userAgent: desktopUserAgent,
       referer: _lastDesktopReferer,
+      browserNavigation: true,
     );
+    _lastDesktopReferer = uri.toString();
     return _viewThreadParser.parse(
       html,
       threadId: threadId,

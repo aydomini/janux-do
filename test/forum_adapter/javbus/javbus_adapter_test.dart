@@ -176,11 +176,11 @@ void main() {
       expect(result.posts, hasLength(2));
       // _ensureSessionWarm 可能先发一次首页请求，取最后一个请求验证
       final uri = fixtureAdapter.requests.last.uri;
-      expect(uri.queryParameters['module'], 'viewthread');
+      expect(uri.queryParameters['mod'], 'viewthread');
       expect(uri.queryParameters['tid'], '1002');
       expect(
         fixtureAdapter.requests.last.headers['User-Agent'],
-        contains('Mobile'),
+        contains('Firefox'),
       );
     });
 

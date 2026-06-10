@@ -1,5 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
@@ -865,6 +866,7 @@ class JavBusCodeBlock extends StatefulWidget {
 
 class _JavBusCodeBlockState extends State<JavBusCodeBlock> {
   List<HighlightToken>? _tokens;
+  bool _copied = false;
 
   @override
   void initState() {
@@ -896,13 +898,23 @@ class _JavBusCodeBlockState extends State<JavBusCodeBlock> {
     }
   }
 
+  Future<void> _copyCode() async {
+    await Clipboard.setData(ClipboardData(text: widget.code));
+    if (!mounted) return;
+    setState(() => _copied = true);
+    await Future.delayed(const Duration(seconds: 2));
+    if (!mounted) return;
+    setState(() => _copied = false);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final semantic = theme.appSemanticColors;
     final isDark = theme.brightness == Brightness.dark;
     final baseStyle = HighlighterService.instance.firaCodeStyle.copyWith(
-      fontSize: 14,
-      height: 1.58,
+      fontSize: 13.5,
+      height: 1.62,
       color: theme.colorScheme.onSurface,
     );
     final tokens = _tokens;
@@ -914,6 +926,15 @@ class _JavBusCodeBlockState extends State<JavBusCodeBlock> {
           )
         : TextSpan(text: widget.code, style: baseStyle);
     final languageLabel = widget.language?.toUpperCase();
+    // 代码块容器色 — 比页面背景深半级，清晰区分但不刺眼
+    final codeBg = isDark
+        ? const Color(0xFF0D1117)
+        : const Color(0xFFF6F8FA);
+    // 边框色 — 融入容器边缘，低调但有结构感
+    final borderColor = isDark
+        ? const Color(0xFF30363D)
+        : const Color(0xFFD0D7DE);
+
     return Padding(
       key: const ValueKey('javbus-code-block'),
       padding: const EdgeInsets.symmetric(vertical: 10),
@@ -921,45 +942,82 @@ class _JavBusCodeBlockState extends State<JavBusCodeBlock> {
         constraints: BoxConstraints(maxWidth: widget.maxWidth),
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: theme.colorScheme.surfaceContainerHighest.withValues(
-              alpha: isDark ? 0.46 : 0.64,
-            ),
+            color: codeBg,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.72),
-            ),
+            border: Border.all(color: borderColor),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (languageLabel != null) ...[
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
-                  child: SelectionContainer.disabled(
-                    child: Text(
-                      languageLabel,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w700,
+              // 头部行：语言标签 | 复制按钮（始终可见）
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+                child: Row(
+                  children: [
+                    if (languageLabel != null)
+                      Expanded(
+                        child: SelectionContainer.disabled(
+                          child: Text(
+                            languageLabel,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 12.5,
+                            ),
+                          ),
+                        ),
+                      )
+                    else
+                      const Spacer(),
+                    SelectionContainer.disabled(
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(5),
+                        onTap: _copyCode,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                _copied
+                                    ? Icons.check_rounded
+                                    : Icons.copy_rounded,
+                                size: 13,
+                                color: _copied
+                                    ? semantic.success
+                                    : theme.colorScheme.onSurfaceVariant,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                _copied ? '已复制' : '复制',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  fontSize: 12,
+                                  color: _copied
+                                      ? semantic.success
+                                      : theme.colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
-                  ),
+                  ],
                 ),
-                Divider(
-                  height: 14,
-                  color: theme.colorScheme.outlineVariant.withValues(
-                    alpha: 0.6,
-                  ),
-                ),
-              ],
+              ),
+              // 分隔线 — 头部与代码之间的视觉分割
+              Divider(
+                height: 1,
+                thickness: 1,
+                color: borderColor,
+              ),
+              // 代码区域 — 水平可滚动
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
-                padding: EdgeInsets.fromLTRB(
-                  14,
-                  languageLabel == null ? 12 : 2,
-                  14,
-                  12,
-                ),
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
                 child: SelectableText.rich(codeSpan),
               ),
             ],
