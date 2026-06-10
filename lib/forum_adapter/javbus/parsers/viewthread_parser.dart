@@ -38,32 +38,31 @@ class ViewThreadParser {
 
     // JavBus 自定义主题将第一帖（楼主）的作者信息放在 .nthread_info 中
     // 而非 post 容器内，需从页面级区域预提取
-    // 名称和 ID 分开提取：名称仅从作者链接获取，ID 可回退到 lz 链接的 authorid 参数
-    final threadHeaderAuthorLink = document.querySelector(
-          '.nthread_info .authi a[href*="uid="]',
-        ) ??
-        document.querySelector('.nthread_info a[href*="uid="]');
-    final threadHeaderAuthorName =
-        threadHeaderAuthorLink?.text.trim() ?? '';
-
-    // 楼主 ID 多级备选：作者链接 uid 参数 → lz 链接 authorid 参数
-    final threadHeaderAuthorId = _extractQueryInt(
-          threadHeaderAuthorLink?.attributes['href'] ?? '', 'uid',
-        ) ??
-        _extractQueryInt(
-          document
-                  .querySelector('.nthread_info a.lz[href*="authorid="]')
-                  ?.attributes['href'] ??
-              '',
-          'authorid',
-        ) ??
-        _extractQueryInt(
-          document
-                  .querySelector('a.lz[href*="authorid="]')
-                  ?.attributes['href'] ??
-              '',
-          'authorid',
-        );
+    // 用迭代替代 CSS 属性选择器，避免 html 包对 [href*=value] 的兼容性问题
+    String threadHeaderAuthorName = '';
+    int? threadHeaderAuthorId;
+    final nthreadInfo = document.querySelector('.nthread_info');
+    if (nthreadInfo != null) {
+      // 首选：查找包含 uid= 的链接获取名称 + ID
+      for (final link in nthreadInfo.querySelectorAll('a')) {
+        final href = link.attributes['href'] ?? '';
+        final uid = _extractQueryInt(href, 'uid');
+        if (uid != null) {
+          threadHeaderAuthorId = uid;
+          threadHeaderAuthorName = link.text.trim();
+          break;
+        }
+      }
+      // 备选：从 lz 链接的 authorid 参数获取 ID
+      threadHeaderAuthorId ??= () {
+        for (final link in nthreadInfo.querySelectorAll('a')) {
+          final href = link.attributes['href'] ?? '';
+          final authorId = _extractQueryInt(href, 'authorid');
+          if (authorId != null) return authorId;
+        }
+        return null;
+      }();
+    }
 
     // 从页面 header 预提取的楼主 ID 作为初始值，确保跨页楼主回复也能识别
     int? threadAuthorId = threadHeaderAuthorId;
@@ -262,10 +261,26 @@ class ViewThreadParser {
   static Element? _closestPostAncestor(Element element) {
     Element? current = element.parent;
     while (current != null) {
-      if (_looksLikePostContainer(current)) return current;
+      if (_looksLikePostContainer(current)) {
+        // 确保不返回包含多个帖子的页面级容器（如 #postlist），
+        // 否则 _authorElement 会在全页范围搜到错误作者
+        if (!_isMultiPostContainer(current)) return current;
+      }
       current = current.parent;
     }
     return null;
+  }
+
+  /// 检查元素是否包含多个帖子（如果是，说明是页面级容器而非单帖容器）
+  static bool _isMultiPostContainer(Element element) {
+    var count = 0;
+    for (final el in element.querySelectorAll('[id]')) {
+      if (_extractPostId(el) != null) {
+        count++;
+        if (count > 1) return true;
+      }
+    }
+    return false;
   }
 
   static Element? _nextPostSibling(Element element) {
