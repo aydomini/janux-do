@@ -38,20 +38,32 @@ class ViewThreadParser {
 
     // JavBus 自定义主题将第一帖（楼主）的作者信息放在 .nthread_info 中
     // 而非 post 容器内，需从页面级区域预提取
-    // 多级备选：1) .nthread_info 作者链接 2) 楼主"只看該作者"链接 3) 页面中第一个 uid 链接
+    // 名称和 ID 分开提取：名称仅从作者链接获取，ID 可回退到 lz 链接的 authorid 参数
     final threadHeaderAuthorLink = document.querySelector(
           '.nthread_info .authi a[href*="uid="]',
         ) ??
-        document.querySelector('.nthread_info a[href*="uid="]') ??
-        document.querySelector('a.lz[href*="authorid="]');
+        document.querySelector('.nthread_info a[href*="uid="]');
+    final threadHeaderAuthorName =
+        threadHeaderAuthorLink?.text.trim() ?? '';
+
+    // 楼主 ID 多级备选：作者链接 uid 参数 → lz 链接 authorid 参数
     final threadHeaderAuthorId = _extractQueryInt(
           threadHeaderAuthorLink?.attributes['href'] ?? '', 'uid',
         ) ??
         _extractQueryInt(
-          threadHeaderAuthorLink?.attributes['href'] ?? '', 'authorid',
+          document
+                  .querySelector('.nthread_info a.lz[href*="authorid="]')
+                  ?.attributes['href'] ??
+              '',
+          'authorid',
+        ) ??
+        _extractQueryInt(
+          document
+                  .querySelector('a.lz[href*="authorid="]')
+                  ?.attributes['href'] ??
+              '',
+          'authorid',
         );
-    final threadHeaderAuthorName =
-        threadHeaderAuthorLink?.text.trim() ?? '';
 
     // 从页面 header 预提取的楼主 ID 作为初始值，确保跨页楼主回复也能识别
     int? threadAuthorId = threadHeaderAuthorId;

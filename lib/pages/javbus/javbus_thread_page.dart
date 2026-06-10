@@ -375,8 +375,8 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
   ///
   /// 两阶段定位策略：
   /// 1. 快速路径：目标在视口内 → GlobalKey 精确跳转
-  /// 2. 慢速路径：目标离屏 → 实测高度累加计算精确偏移 → animateTo
-  ///    滚动到位 → ensureVisible 像素级微调
+  /// 2. 慢速路径：目标离屏 → 实测高度累加 → jumpTo + 重试推进
+  ///    直到目标 Widget 进入构建树 → ensureVisible 像素级微调
   Future<void> _scrollToPost(int pid) async {
     final key = _postKeys[pid];
 
@@ -400,29 +400,33 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
     // 先记录当前可见帖子的高度，刷新估算数据
     _recordPostHeights();
 
-    final estimatedOffset =
-        _estimatePostOffset(targetIndex).clamp(
-          0.0,
-          _scrollController.position.maxScrollExtent,
-        );
-
-    await _scrollController.animateTo(
-      estimatedOffset,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
+    final maxOffset = _scrollController.position.maxScrollExtent;
+    var estimatedOffset = _estimatePostOffset(targetIndex).clamp(
+      0.0,
+      maxOffset,
     );
 
-    if (!mounted) return;
-    final slowCtx = _postKeys[pid]?.currentContext;
-    if (slowCtx != null) {
-      // slowCtx 来自 GlobalKey，非 widget context，null 检查已足够
-      Scrollable.ensureVisible(
-        // ignore: use_build_context_synchronously
-        slowCtx,
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeInOut,
-        alignment: 0.1,
-      );
+    // 最多重试 5 次：每次推进一个估算帖子高度，直到目标 Widget 被构建
+    for (var retry = 0; retry < 5; retry++) {
+      _scrollController.jumpTo(estimatedOffset);
+      // 等待下一帧布局完成
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+
+      final ctx = _postKeys[pid]?.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          // ignore: use_build_context_synchronously
+          ctx,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+          alignment: 0.1,
+        );
+        return;
+      }
+      // 目标仍未构建，估算偏差较大，推进一个帖子高度后重试
+      estimatedOffset =
+          (estimatedOffset + _estimatedPostHeight + 28).clamp(0.0, maxOffset);
     }
   }
 
@@ -537,6 +541,7 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
                 post: post,
                 displayFloorNumber: displayFloorNumber,
                 isThreadAuthor: _isPostByThreadAuthor(post),
+                threadAuthorId: _threadAuthorId,
                 comments: postComments,
                 onQuoteTapped: (pid) => _scrollToPost(pid),
               );
@@ -555,6 +560,7 @@ class _PostCard extends StatelessWidget {
     required this.post,
     required this.displayFloorNumber,
     required this.isThreadAuthor,
+    this.threadAuthorId,
     this.comments = const [],
     this.onQuoteTapped,
   });
@@ -562,6 +568,7 @@ class _PostCard extends StatelessWidget {
   final ForumPost post;
   final int displayFloorNumber;
   final bool isThreadAuthor;
+  final int? threadAuthorId;
   final List<ForumComment> comments;
   final void Function(int pid)? onQuoteTapped;
 
@@ -659,7 +666,10 @@ class _PostCard extends StatelessWidget {
                     ],
                     if (comments.isNotEmpty) ...[
                       const SizedBox(height: 12),
-                      _CommentSection(comments: comments),
+                      _CommentSection(
+                        comments: comments,
+                        threadAuthorId: threadAuthorId,
+                      ),
                     ],
                   ],
                 ),
@@ -768,6 +778,13 @@ Widget? _buildJavBusHtmlWidget(
   double contentWidth, {
   void Function(int pid)? onQuoteTapped,
 }) {
+  if (element.classes.contains('blockcode')) {
+    return JavBusCodeBlock(
+      code: _extractBlockCodeText(element),
+      language: null,
+      maxWidth: contentWidth,
+    );
+  }
   if (element.localName == 'pre') {
     final codeElement = element.querySelector('code') ?? element;
     return JavBusCodeBlock(
@@ -776,7 +793,8 @@ Widget? _buildJavBusHtmlWidget(
       maxWidth: contentWidth,
     );
   }
-  if (element.localName == 'blockquote') {
+  if (element.classes.contains('quote') ||
+      element.localName == 'blockquote') {
     return JavBusQuoteBlock(
       html: element.innerHtml,
       maxWidth: contentWidth,
@@ -873,7 +891,27 @@ String _resolvePostResourceUrl(String rawUrl) {
   return const JavBusUrlBuilder().resolve(rawUrl);
 }
 
-String _extractCodeText(dom.Element codeElement) {
+  /// 从 Discuz 代码块 (.blockcode > ol > li) 提取纯文本代码
+  String _extractBlockCodeText(dom.Element blockcodeElement) {
+    final ol = blockcodeElement.querySelector('ol');
+    if (ol == null) return blockcodeElement.text;
+    final lines = <String>[];
+    for (final li in ol.querySelectorAll('li')) {
+      // 移除 <br> 标签，保留文本
+      var line = '';
+      for (final node in li.nodes) {
+        if (node is dom.Element && node.localName == 'br') {
+          // <br> 可能被用作换行符
+          continue;
+        }
+        line += node.text ?? '';
+      }
+      lines.add(line);
+    }
+    return lines.join('\n');
+  }
+
+  String _extractCodeText(dom.Element codeElement) {
   final text = codeElement.text;
   if (text.endsWith('\n')) {
     return text.substring(0, text.length - 1);
@@ -1502,9 +1540,10 @@ class _PostAvatar extends StatelessWidget {
 }
 
 class _CommentSection extends StatefulWidget {
-  const _CommentSection({required this.comments});
+  const _CommentSection({required this.comments, this.threadAuthorId});
 
   final List<ForumComment> comments;
+  final int? threadAuthorId;
 
   @override
   State<_CommentSection> createState() => _CommentSectionState();
@@ -1571,13 +1610,26 @@ class _CommentSectionState extends State<_CommentSection> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            comment.author,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: baseStyle?.copyWith(
-                              fontWeight: FontWeight.w800,
-                            ),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  comment.author,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: baseStyle?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
+                              if (comment.authorId != null &&
+                                  comment.authorId ==
+                                      widget.threadAuthorId) ...[
+                                const SizedBox(width: 6),
+                                const _AuthorBadge(label: '楼主'),
+                              ],
+                            ],
                           ),
                           SelectionArea(
                             child: Text(
