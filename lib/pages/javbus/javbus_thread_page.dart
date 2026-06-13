@@ -1826,7 +1826,7 @@ class _CommentSectionState extends State<_CommentSection> {
                           child: Text(
                             _formatCommentTime(comment.createdAt!),
                             textAlign: TextAlign.right,
-                            style: baseStyle?.copyWith(
+                            style: theme.textTheme.bodyMedium?.copyWith(
                               color: theme.colorScheme.onSurfaceVariant
                                   .withValues(alpha: 0.72),
                             ),

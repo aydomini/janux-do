@@ -65,6 +65,17 @@ class ViewThreadParser {
       }();
     }
 
+    // 从 .nthread_info 预提取首帖发布时间
+    // JavBus 自定义主题中首帖的 .authi 和 .time 均在楼层容器外的 .nthread_info 区域，
+    // _timeText 无法匹配。格式一般为 "YYYY-M-D HH:MM:SS"。
+    DateTime? threadHeaderCreatedAt;
+    if (nthreadInfo != null) {
+      final timeSpan = nthreadInfo.querySelector('.authi .mr10');
+      if (timeSpan != null) {
+        threadHeaderCreatedAt = timeParser.parse(timeSpan.text);
+      }
+    }
+
     // 从页面 header 预提取的楼主 ID 作为初始值，确保跨页楼主回复也能识别
     int? threadAuthorId = threadHeaderAuthorId;
 
@@ -95,6 +106,11 @@ class ViewThreadParser {
       // isThreadAuthor 简化为纯 ID 比较：楼主 = 1# 的作者 ID。
       // 只要 threadAuthorId 已确定（来自 header 或第一帖），后续楼层和点评
       // 只需 authorId == threadAuthorId 即可稳定匹配，无需 floorNumber 特判。
+      // 第一帖的 createdAt 优先使用 .nthread_info 预提取的时间（JavBus 自定义主题），
+      // 容器内回退（标准 Discuz 主题）
+      final createdAt = isFloorOne && threadHeaderCreatedAt != null
+          ? threadHeaderCreatedAt
+          : timeParser.parse(_timeText(container));
       posts.add(
         ForumPost(
           postId: postId,
@@ -102,7 +118,7 @@ class ViewThreadParser {
           floorNumber: floorNumber,
           author: authorName,
           authorId: effectiveAuthorId,
-          createdAt: timeParser.parse(_timeText(container)),
+          createdAt: createdAt,
           avatarUrl: _extractAvatarUrl(container, urlBuilder)
               ?? urlBuilder.buildAvatarUrl(effectiveAuthorId),
           contentHtml: contentHtml,
