@@ -120,9 +120,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: janux-do-macos-dmg
-          path: |
-            dist/${{ env.DMG_NAME }}
-            dist/${{ env.DMG_NAME }}.sha256
+          path: dist/${{ env.DMG_NAME }}
           if-no-files-found: error
           overwrite: true
 
