@@ -70,7 +70,7 @@ class ViewThreadParser {
     // _timeText 无法匹配。格式一般为 "YYYY-M-D HH:MM:SS"。
     DateTime? threadHeaderCreatedAt;
     if (nthreadInfo != null) {
-      final timeSpan = nthreadInfo.querySelector('.authi .mr10');
+      final timeSpan = nthreadInfo.querySelector('.authi span.mr10');
       if (timeSpan != null) {
         threadHeaderCreatedAt = timeParser.parse(timeSpan.text);
       }
