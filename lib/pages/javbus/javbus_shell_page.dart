@@ -31,6 +31,8 @@ class _JavBusShellPageState extends ConsumerState<JavBusShellPage> {
   bool _isFavoritesMode = false;
   /// 进入帖子详情前是否处于收藏模式，返回时用于恢复收藏面板
   bool _wasInFavoritesMode = false;
+  /// 进入帖子详情前是否处于搜索模式，返回时用于恢复搜索结果
+  bool _wasInSearchMode = false;
   final Map<String, _ThreadListPaneCache> _threadListCaches = {};
   final Map<int, JavBusThreadContentCache> _threadContentCaches = {};
   SearchPaneCache? _searchCache;
@@ -94,6 +96,7 @@ class _JavBusShellPageState extends ConsumerState<JavBusShellPage> {
   void _selectThread(ForumThread thread) {
     setState(() {
       _wasInFavoritesMode = _isFavoritesMode;
+      _wasInSearchMode = _isSearchMode;
       _selectedThread = thread;
       // 从搜索或收藏模式中选中帖子 → 退出特殊模式，在右侧面板显示详情
       _isSearchMode = false;
@@ -240,6 +243,10 @@ class _JavBusShellPageState extends ConsumerState<JavBusShellPage> {
               _isFavoritesMode = true;
               _wasInFavoritesMode = false;
             }
+            if (_wasInSearchMode) {
+              _isSearchMode = true;
+              _wasInSearchMode = false;
+            }
           }),
           );
         }
@@ -263,6 +270,10 @@ class _JavBusShellPageState extends ConsumerState<JavBusShellPage> {
             if (_wasInFavoritesMode) {
               _isFavoritesMode = true;
               _wasInFavoritesMode = false;
+            }
+            if (_wasInSearchMode) {
+              _isSearchMode = true;
+              _wasInSearchMode = false;
             }
           }),
         );
