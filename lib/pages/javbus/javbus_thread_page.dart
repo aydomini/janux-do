@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,6 +9,7 @@ import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
 import 'package:html/dom.dart' as dom;
 
 import '../../forum_adapter/javbus/utils/url_builder.dart';
+import '../../forum_adapter/models/forum_poll.dart';
 import '../../forum_adapter/models/forum_post.dart';
 import '../../forum_adapter/models/forum_thread.dart';
 import '../../providers/favorites_provider.dart';
@@ -14,6 +17,7 @@ import '../../providers/forum_provider.dart';
 import '../../services/highlighter_service.dart';
 import '../../services/javbus_cache_manager.dart';
 import '../../services/network/cookie/cookie_jar_service.dart';
+import '../../services/thread_content_cache_service.dart';
 
 import '../../theme/app_semantic_colors.dart';
 import '../../theme/app_typography.dart';
@@ -22,6 +26,7 @@ import '../../widgets/common/error_view.dart';
 import '../../widgets/common/loading_spinner.dart';
 import 'image_header_service.dart';
 import 'javbus_layout.dart';
+import 'widgets/poll_card.dart';
 
 class JavBusThreadPage extends ConsumerStatefulWidget {
   const JavBusThreadPage({
@@ -53,7 +58,8 @@ class _JavBusThreadPageState extends ConsumerState<JavBusThreadPage> {
         title: Text(widget.initialTitle),
         actions: [
           _FavoriteButton(
-            thread: widget.fullThread ??
+            thread:
+                widget.fullThread ??
                 ForumThread(
                   threadId: widget.threadId,
                   forumId: 0,
@@ -82,6 +88,7 @@ class JavBusThreadContentCache {
   bool hasNextPage = true;
   bool hasLoaded = false;
   double scrollOffset = 0;
+  ForumPoll? poll;
 }
 
 class JavBusThreadContent extends ConsumerStatefulWidget {
@@ -114,17 +121,29 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
   StackTrace? _stackTrace;
   int? _threadAuthorId;
   Map<int, List<ForumComment>> _comments = {};
+  ForumPoll? _poll;
   DateTime? _lastHeightRecord;
+
+  /// 首頁帖子数，用于 _silentRefresh 精确按页替换和保护。
+  int _firstPagePostCount = 0;
 
   @override
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
     _restoreFromCache();
+    if (!_cache.hasLoaded) {
+      _restoreFromFileCache();
+    }
     if (_isLoadingInitial) {
       Future.microtask(_refreshPosts);
     } else {
       _restoreScrollOffset();
+      // 仅当数据来自文件缓存（非内存缓存）时，后台静默刷新获取最新内容。
+      // 内存缓存来自当前 shell 会话回退，数据仍为最新，无需额外请求。
+      if (!_cache.hasLoaded) {
+        Future.microtask(_silentRefresh);
+      }
     }
   }
 
@@ -156,6 +175,7 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
       ..clear()
       ..addAll(_cache.posts);
     _comments = Map<int, List<ForumComment>>.from(_cache.comments);
+    _poll = _cache.poll;
     _currentPage = _cache.currentPage;
     _hasNextPage = _cache.hasNextPage;
     _isLoadingInitial = false;
@@ -199,19 +219,133 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
     _cache
       ..currentPage = _currentPage
       ..hasNextPage = _hasNextPage
-      ..hasLoaded = !_isLoadingInitial && _posts.isNotEmpty;
+      ..hasLoaded = !_isLoadingInitial && _posts.isNotEmpty
+      ..poll = _poll;
     if (_scrollController.hasClients) {
       _cache.scrollOffset = _scrollController.position.pixels;
     }
   }
 
+  /// 从文件缓存恢复帖子内容（内存缓存为空时调用）
+  ///
+  /// 即使缓存已过期也照常恢复，确保帖子被删除后仍可离线阅读。
+  void _restoreFromFileCache() {
+    final cached = ThreadContentCacheService.instance.load(widget.threadId);
+    if (cached == null) return;
+    _posts
+      ..clear()
+      ..addAll(cached.posts);
+    _comments = Map<int, List<ForumComment>>.from(cached.comments);
+    _poll = cached.poll;
+    _currentPage = cached.currentPage;
+    _hasNextPage = cached.hasNextPage;
+    _threadAuthorId = cached.threadAuthorId;
+    _firstPagePostCount = cached.firstPagePostCount;
+    _isLoadingInitial = false;
+  }
+
+  /// 后台静默刷新帖子内容（已有缓存数据时调用）
+  ///
+  /// 增量合并策略：新帖子追加，旧帖子保留（即使已被服务器删除）。
+  /// 点评同理 — 已有帖子 ID 的点评列表不覆盖，仅追加新帖子的点评。
+  /// 网络请求失败时保持现有缓存不变。
+  Future<void> _silentRefresh() async {
+    try {
+      final result = await ref
+          .read(forumAdapterProvider)
+          .getPosts(threadId: widget.threadId);
+      if (!mounted) return;
+
+      try {
+        if (CookieJarService().isInitialized) {
+          await ImageHeaderService.instance.refresh();
+        }
+      } catch (_) {}
+
+      // 增量合并帖子：追加新帖，保留旧帖
+      final existingIds = _posts.map((p) => p.postId).toSet();
+      final newPosts = result.posts
+          .where((p) => !existingIds.contains(p.postId))
+          .toList(growable: false);
+
+      if (newPosts.isNotEmpty) {
+        setState(() {
+          _posts.addAll(newPosts);
+          _trackThreadAuthor(fromResult: result.threadAuthorId);
+          _saveCache();
+        });
+      }
+
+      if (result.poll != null) _poll = result.poll;
+      _currentPage = result.currentPage;
+      _hasNextPage = result.hasNextPage;
+
+      _mergeComments(1);
+      unawaited(_writeFileCache());
+    } catch (_) {
+      // 网络刷新失败，保持现有缓存数据
+    }
+  }
+
+  /// 增量合并点评：已有帖子 ID 的点评保留不动，仅追加新帖子 ID 的点评。
+  Future<void> _mergeComments(int page) async {
+    if (!_loadedCommentPages.add(page)) return;
+    try {
+      final comments = await ref
+          .read(forumAdapterProvider)
+          .getComments(widget.threadId, page: page);
+      if (!mounted) return;
+      setState(() {
+        for (final entry in comments.entries) {
+          if (!_comments.containsKey(entry.key)) {
+            _comments[entry.key] = entry.value;
+          }
+        }
+      });
+    } catch (_) {
+      _loadedCommentPages.remove(page);
+    }
+  }
+
+  /// 将当前帖子内容写入文件缓存并预加载图片资源
+  ///
+  /// 正文 JSON 和图片并行写入，单个失败不影响整体。
+  Future<void> _writeFileCache() async {
+    try {
+      await ThreadContentCacheService.instance.save(
+        threadId: widget.threadId,
+        posts: _posts,
+        comments: _comments,
+        poll: _poll,
+        currentPage: _currentPage,
+        hasNextPage: _hasNextPage,
+        threadAuthorId: _threadAuthorId,
+        firstPagePostCount: _firstPagePostCount,
+      );
+      // 后台下载正文图片、头像到帖子永久目录
+      unawaited(
+        ThreadContentCacheService.instance.cacheImages(
+          threadId: widget.threadId,
+          posts: _posts,
+          comments: _comments,
+        ),
+      );
+    } catch (_) {
+      // 文件写入失败不影响正常浏览
+    }
+  }
+
   Future<void> _refreshPosts() async {
-    setState(() {
-      _isLoadingInitial = true;
-      _isLoadingMore = false;
-      _error = null;
-      _stackTrace = null;
-    });
+    // 有本地缓存时（下拉刷新）不显示全屏 loading，保持内容可见
+    final hasLocalCache = _posts.isNotEmpty;
+    if (!hasLocalCache) {
+      setState(() {
+        _isLoadingInitial = true;
+        _isLoadingMore = false;
+        _error = null;
+        _stackTrace = null;
+      });
+    }
     try {
       final result = await ref
           .read(forumAdapterProvider)
@@ -227,19 +361,36 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
         // refresh 失败不影响帖子内容显示，图片可能缺少 Cookie
       }
       setState(() {
-        _posts
-          ..clear()
-          ..addAll(result.posts);
+        if (hasLocalCache) {
+          // 下拉刷新 → 增量合并：保留缓存旧帖，追加新帖
+          final existingIds = _posts.map((p) => p.postId).toSet();
+          final newPosts = result.posts
+              .where((p) => !existingIds.contains(p.postId))
+              .toList(growable: false);
+          _posts.addAll(newPosts);
+        } else {
+          // 初始加载 → 全量替换
+          _posts
+            ..clear()
+            ..addAll(result.posts);
+          _firstPagePostCount = result.posts.length;
+        }
         _trackThreadAuthor(fromResult: result.threadAuthorId);
+        if (result.poll != null) _poll = result.poll;
         _currentPage = result.currentPage;
         _hasNextPage = result.hasNextPage;
         _isLoadingInitial = false;
         _cache.scrollOffset = 0;
         _saveCache();
       });
-      _loadComments(1);
+      if (!hasLocalCache) {
+        _loadComments(1);
+      }
+      unawaited(_writeFileCache());
     } catch (error, stackTrace) {
       if (!mounted) return;
+      // 有本地缓存时网络失败不影响阅读，保持缓存内容可见
+      if (hasLocalCache) return;
       setState(() {
         _error = error;
         _stackTrace = stackTrace;
@@ -280,6 +431,7 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
       // 基于帖子锚定恢复滚动位置
       _restoreScrollAnchor();
       _loadComments(requestedPage);
+      unawaited(_writeFileCache());
     } catch (error, stackTrace) {
       if (!mounted) return;
       setState(() {
@@ -401,10 +553,9 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
     _recordPostHeights();
 
     final maxOffset = _scrollController.position.maxScrollExtent;
-    var estimatedOffset = _estimatePostOffset(targetIndex).clamp(
-      0.0,
-      maxOffset,
-    );
+    var estimatedOffset = _estimatePostOffset(
+      targetIndex,
+    ).clamp(0.0, maxOffset);
 
     // 最多重试 5 次：每次推进一个估算帖子高度，直到目标 Widget 被构建
     for (var retry = 0; retry < 5; retry++) {
@@ -425,8 +576,10 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
         return;
       }
       // 目标仍未构建，估算偏差较大，推进一个帖子高度后重试
-      estimatedOffset =
-          (estimatedOffset + _estimatedPostHeight + 28).clamp(0.0, maxOffset);
+      estimatedOffset = (estimatedOffset + _estimatedPostHeight + 28).clamp(
+        0.0,
+        maxOffset,
+      );
     }
   }
 
@@ -504,54 +657,56 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
       child: LayoutBuilder(
         builder: (context, constraints) {
           return ScrollConfiguration(
-            behavior: ScrollConfiguration.of(context).copyWith(
-              scrollbars: false,
-            ),
+            behavior: ScrollConfiguration.of(
+              context,
+            ).copyWith(scrollbars: false),
             child: ListView.separated(
-            controller: _scrollController,
-            padding: JavBusLayout.threadPadding,
-            itemCount: _posts.length + 1,
-            separatorBuilder: (context, index) {
-              if (index >= _posts.length - 1) {
-                return const SizedBox(height: 10);
-              }
-              return Align(
-                alignment: Alignment.center,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    maxWidth: JavBusLayout.contentMaxWidth,
+              controller: _scrollController,
+              padding: JavBusLayout.threadPadding,
+              itemCount: _posts.length + 1,
+              separatorBuilder: (context, index) {
+                if (index >= _posts.length - 1) {
+                  return const SizedBox(height: 10);
+                }
+                return Align(
+                  alignment: Alignment.center,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      maxWidth: JavBusLayout.contentMaxWidth,
+                    ),
+                    child: const Divider(height: 28),
                   ),
-                  child: const Divider(height: 28),
-                ),
-              );
-            },
-            itemBuilder: (context, index) {
-              if (index == _posts.length) {
-                return _LoadMoreFooter(
-                  hasNextPage: _hasNextPage,
-                  isLoading: _isLoadingMore,
-                  error: _posts.isEmpty ? null : _error,
-                  onRetry: _loadNextPage,
                 );
-              }
-              final postIndex = index;
-              final post = _posts[postIndex];
-              final displayFloorNumber = post.floorNumber < postIndex + 1
-                  ? postIndex + 1
-                  : post.floorNumber;
-              final postComments = _comments[post.postId] ?? const <ForumComment>[];
-              return _PostCard(
-                key: _postKeys.putIfAbsent(post.postId, () => GlobalKey()),
-                post: post,
-                displayFloorNumber: displayFloorNumber,
-                isThreadAuthor: _isPostByThreadAuthor(post),
-                threadAuthorId: _threadAuthorId,
-                comments: postComments,
-                onQuoteTapped: (pid) => _scrollToPost(pid),
-              );
-            },
-          ),
-        );
+              },
+              itemBuilder: (context, index) {
+                if (index == _posts.length) {
+                  return _LoadMoreFooter(
+                    hasNextPage: _hasNextPage,
+                    isLoading: _isLoadingMore,
+                    error: _posts.isEmpty ? null : _error,
+                    onRetry: _loadNextPage,
+                  );
+                }
+                final postIndex = index;
+                final post = _posts[postIndex];
+                final displayFloorNumber = post.floorNumber < postIndex + 1
+                    ? postIndex + 1
+                    : post.floorNumber;
+                final postComments =
+                    _comments[post.postId] ?? const <ForumComment>[];
+                return _PostCard(
+                  key: _postKeys.putIfAbsent(post.postId, () => GlobalKey()),
+                  post: post,
+                  displayFloorNumber: displayFloorNumber,
+                  isThreadAuthor: _isPostByThreadAuthor(post),
+                  threadAuthorId: _threadAuthorId,
+                  comments: postComments,
+                  poll: post.floorNumber == 1 ? _poll : null,
+                  onQuoteTapped: (pid) => _scrollToPost(pid),
+                );
+              },
+            ),
+          );
         },
       ),
     );
@@ -566,6 +721,7 @@ class _PostCard extends StatelessWidget {
     required this.isThreadAuthor,
     this.threadAuthorId,
     this.comments = const [],
+    this.poll,
     this.onQuoteTapped,
   });
 
@@ -574,6 +730,7 @@ class _PostCard extends StatelessWidget {
   final bool isThreadAuthor;
   final int? threadAuthorId;
   final List<ForumComment> comments;
+  final ForumPoll? poll;
   final void Function(int pid)? onQuoteTapped;
 
   @override
@@ -596,102 +753,107 @@ class _PostCard extends StatelessWidget {
               children: [
                 ConstrainedBox(
                   constraints: const BoxConstraints(
+                    minWidth: 240,
                     maxWidth: JavBusLayout.textContentMaxWidth,
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Flexible(
-                          child: Text(
-                            post.author,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodyLarge?.copyWith(
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                        if (isThreadAuthor) ...[
-                          const SizedBox(width: 8),
-                          const _AuthorBadge(label: '楼主'),
-                        ],
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    LayoutBuilder(
-                      builder: (context, constraints) {
-                        return SelectionArea(
-                          child: HtmlWidget(
-                            post.contentHtml,
-                            renderMode: RenderMode.column,
-                            textStyle: theme.textTheme.bodyLarge?.copyWith(
-                              fontSize: AppTypography.readingBodyFontSize,
-                              height: AppTypography.readingBodyHeight,
-                            ),
-                            customStylesBuilder: (element) =>
-                                _buildJavBusHtmlStyles(theme, element),
-                            customWidgetBuilder: (element) =>
-                                _buildJavBusHtmlWidget(
-                                  context,
-                                  element,
-                                  constraints.maxWidth,
-                                  onQuoteTapped: onQuoteTapped,
-                                ),
-                            onTapUrl: (url) {
-                              launchInExternalBrowser(url);
-                              return true;
-                            },
-                          ),
-                        );
-                      },
-                    ),
-                    if (post.attachments.isNotEmpty) ...[
-                      const SizedBox(height: 16),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          for (final attachment in post.attachments)
-                            OutlinedButton.icon(
-                              onPressed: () =>
-                                  launchInExternalBrowser(attachment.url),
-                              icon: const Icon(
-                                Icons.attach_file_rounded,
-                                size: 18,
+                          Flexible(
+                            child: Text(
+                              post.author,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodyLarge?.copyWith(
+                                fontWeight: FontWeight.w800,
                               ),
-                              label: Text(attachment.fileName),
                             ),
+                          ),
+                          if (isThreadAuthor) ...[
+                            const SizedBox(width: 8),
+                            const _AuthorBadge(label: '楼主'),
+                          ],
                         ],
                       ),
-                    ],
-                    if (comments.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      _CommentSection(
-                        comments: comments,
-                        threadAuthorId: threadAuthorId,
+                      const SizedBox(height: 14),
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          return SelectionArea(
+                            child: HtmlWidget(
+                              post.contentHtml,
+                              renderMode: RenderMode.column,
+                              textStyle: theme.textTheme.bodyLarge?.copyWith(
+                                fontSize: AppTypography.readingBodyFontSize,
+                                height: AppTypography.readingBodyHeight,
+                              ),
+                              customStylesBuilder: (element) =>
+                                  _buildJavBusHtmlStyles(theme, element),
+                              customWidgetBuilder: (element) =>
+                                  _buildJavBusHtmlWidget(
+                                    context,
+                                    element,
+                                    constraints.maxWidth,
+                                    onQuoteTapped: onQuoteTapped,
+                                  ),
+                              onTapUrl: (url) {
+                                launchInExternalBrowser(url);
+                                return true;
+                              },
+                            ),
+                          );
+                        },
                       ),
+                      if (poll != null) ...[
+                        const SizedBox(height: 12),
+                        PollCard(poll: poll!),
+                      ],
+                      if (post.attachments.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final attachment in post.attachments)
+                              OutlinedButton.icon(
+                                onPressed: () =>
+                                    launchInExternalBrowser(attachment.url),
+                                icon: const Icon(
+                                  Icons.attach_file_rounded,
+                                  size: 18,
+                                ),
+                                label: Text(attachment.fileName),
+                              ),
+                          ],
+                        ),
+                      ],
+                      if (comments.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        _CommentSection(
+                          comments: comments,
+                          threadAuthorId: threadAuthorId,
+                        ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-        const SizedBox(width: 18),
-        SizedBox(
-          width: JavBusLayout.postMetaColumnWidth,
-                child: _PostMetaColumn(
-                  floorNumber: displayFloorNumber,
-                  createdAt: post.createdAt,
-                ),
-              ),
-            ],
+          const SizedBox(width: 18),
+          SizedBox(
+            width: JavBusLayout.postMetaColumnWidth,
+            child: _PostMetaColumn(
+              floorNumber: displayFloorNumber,
+              createdAt: post.createdAt,
+            ),
           ),
-        );
+        ],
+      ),
+    );
   }
 }
 
@@ -763,7 +925,7 @@ String _formatPostMetaTime(DateTime value) {
   String two(int input) => input.toString().padLeft(2, '0');
   final dateStr = value.year == now.year
       ? '${two(value.month)} 月 ${two(value.day)} 日'
-      : '${value.year} 年 ${two(value.month)} 月 ${two(value.day)} 日';
+      : '${two(value.year % 100)} 年 ${two(value.month)} 月 ${two(value.day)} 日';
   return '$dateStr\n${two(value.hour)}:${two(value.minute)}';
 }
 
@@ -772,8 +934,8 @@ String _formatCommentTime(DateTime value) {
   String two(int input) => input.toString().padLeft(2, '0');
   final dateStr = value.year == now.year
       ? '${two(value.month)} 月 ${two(value.day)} 日'
-      : '${value.year} 年 ${two(value.month)} 月 ${two(value.day)} 日';
-  return '$dateStr ${two(value.hour)}:${two(value.minute)}';
+      : '${two(value.year % 100)} 年 ${two(value.month)} 月 ${two(value.day)} 日';
+  return '$dateStr\n${two(value.hour)}:${two(value.minute)}';
 }
 
 Widget? _buildJavBusHtmlWidget(
@@ -797,8 +959,7 @@ Widget? _buildJavBusHtmlWidget(
       maxWidth: contentWidth,
     );
   }
-  if (element.classes.contains('quote') ||
-      element.localName == 'blockquote') {
+  if (element.classes.contains('quote') || element.localName == 'blockquote') {
     return JavBusQuoteBlock(
       html: element.innerHtml,
       maxWidth: contentWidth,
@@ -809,6 +970,7 @@ Widget? _buildJavBusHtmlWidget(
     final src = element.attributes['src']?.trim();
     if (src == null || src.isEmpty) return null;
     final url = _resolvePostResourceUrl(src);
+    if (_isBlockedImageUrl(url)) return const SizedBox.shrink();
     if (_isInlineEmojiImage(element, url)) {
       return InlineCustomWidget(
         alignment: PlaceholderAlignment.middle,
@@ -835,15 +997,15 @@ Widget? _buildJavBusHtmlWidget(
 }
 
 void _showJavBusVideoPreview(BuildContext context, String url) {
-    final semanticColors = Theme.of(context).appSemanticColors;
-    showDialog<void>(
-      context: context,
-      barrierColor: semanticColors.imagePreviewScrim.withValues(alpha: 0.82),
-      builder: (context) => JavBusVideoPlayerDialog(url: url),
-    );
-  }
+  final semanticColors = Theme.of(context).appSemanticColors;
+  showDialog<void>(
+    context: context,
+    barrierColor: semanticColors.imagePreviewScrim.withValues(alpha: 0.82),
+    builder: (context) => JavBusVideoPlayerDialog(url: url),
+  );
+}
 
-  void _showJavBusImagePreview(BuildContext context, String url) {
+void _showJavBusImagePreview(BuildContext context, String url) {
   final semanticColors = Theme.of(context).appSemanticColors;
   showDialog<void>(
     context: context,
@@ -895,27 +1057,27 @@ String _resolvePostResourceUrl(String rawUrl) {
   return const JavBusUrlBuilder().resolve(rawUrl);
 }
 
-  /// 从 Discuz 代码块 (.blockcode > ol > li) 提取纯文本代码
-  String _extractBlockCodeText(dom.Element blockcodeElement) {
-    final ol = blockcodeElement.querySelector('ol');
-    if (ol == null) return blockcodeElement.text;
-    final lines = <String>[];
-    for (final li in ol.querySelectorAll('li')) {
-      // 移除 <br> 标签，保留文本
-      var line = '';
-      for (final node in li.nodes) {
-        if (node is dom.Element && node.localName == 'br') {
-          // <br> 可能被用作换行符
-          continue;
-        }
-        line += node.text ?? '';
+/// 从 Discuz 代码块 (.blockcode > ol > li) 提取纯文本代码
+String _extractBlockCodeText(dom.Element blockcodeElement) {
+  final ol = blockcodeElement.querySelector('ol');
+  if (ol == null) return blockcodeElement.text;
+  final lines = <String>[];
+  for (final li in ol.querySelectorAll('li')) {
+    // 移除 <br> 标签，保留文本
+    var line = '';
+    for (final node in li.nodes) {
+      if (node is dom.Element && node.localName == 'br') {
+        // <br> 可能被用作换行符
+        continue;
       }
-      lines.add(line);
+      line += node.text ?? '';
     }
-    return lines.join('\n');
+    lines.add(line);
   }
+  return lines.join('\n');
+}
 
-  String _extractCodeText(dom.Element codeElement) {
+String _extractCodeText(dom.Element codeElement) {
   final text = codeElement.text;
   if (text.endsWith('\n')) {
     return text.substring(0, text.length - 1);
@@ -1041,9 +1203,7 @@ class _JavBusCodeBlockState extends State<JavBusCodeBlock> {
         : TextSpan(text: widget.code, style: baseStyle);
     final languageLabel = widget.language?.toUpperCase();
     // 代码块容器色 — 比页面背景深半级，清晰区分但不刺眼
-    final codeBg = isDark
-        ? const Color(0xFF0D1117)
-        : const Color(0xFFF6F8FA);
+    final codeBg = isDark ? const Color(0xFF0D1117) : const Color(0xFFF6F8FA);
     // 边框色 — 融入容器边缘，低调但有结构感
     final borderColor = isDark
         ? const Color(0xFF30363D)
@@ -1123,11 +1283,7 @@ class _JavBusCodeBlockState extends State<JavBusCodeBlock> {
                 ),
               ),
               // 分隔线 — 头部与代码之间的视觉分割
-              Divider(
-                height: 1,
-                thickness: 1,
-                color: borderColor,
-              ),
+              Divider(height: 1, thickness: 1, color: borderColor),
               // 代码区域 — 水平可滚动
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
@@ -1191,6 +1347,7 @@ class JavBusQuoteBlock extends StatelessWidget {
                   final src = element.attributes['src']?.trim();
                   if (src == null || src.isEmpty) return null;
                   final url = _resolvePostResourceUrl(src);
+                  if (_isBlockedImageUrl(url)) return const SizedBox.shrink();
                   if (_isInlineEmojiImage(element, url)) {
                     return InlineCustomWidget(
                       alignment: PlaceholderAlignment.middle,
@@ -1219,7 +1376,8 @@ class JavBusQuoteBlock extends StatelessWidget {
     if (parsed == null) return false;
     final pid = int.tryParse(parsed.queryParameters['pid'] ?? '');
     if (pid == null) return false;
-    final isQuoteLink = parsed.path.contains('redirect') ||
+    final isQuoteLink =
+        parsed.path.contains('redirect') ||
         parsed.queryParameters['goto'] == 'findpost';
     if (!isQuoteLink) return false;
     onQuoteTapped!(pid);
@@ -1240,12 +1398,14 @@ class JavBusPostImage extends StatelessWidget {
   final VoidCallback onOpen;
 
   /// 图片请求头（含 cookie 缓存，由 ImageHeaderService 统一管理）
-  static Map<String, String> get httpHeaders => ImageHeaderService.instance.headers;
+  static Map<String, String> get httpHeaders =>
+      ImageHeaderService.instance.headers;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final previewWidth = _previewWidth(maxWidth);
+    final localFile = ThreadContentCacheService.instance.getImageFile(url);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: ConstrainedBox(
@@ -1259,33 +1419,34 @@ class JavBusPostImage extends StatelessWidget {
               width: previewWidth,
               height: _postMediaPreviewHeight,
               color: theme.colorScheme.surfaceContainerHighest,
-              child: CachedNetworkImage(
-                imageUrl: url,
-                httpHeaders: ImageHeaderService.instance.headers,
-                cacheManager: JavBusPostImageCacheManager(),
-                fit: BoxFit.contain,
-                placeholder: (context, url) => Container(
-                  color: theme.colorScheme.surfaceContainerHighest,
-                ),
-                errorWidget: (context, url, error) => Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.broken_image_outlined,
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        '图片加载失败，点击打开原图',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
+              child: localFile != null
+                  ? Image.file(localFile, fit: BoxFit.contain)
+                  : CachedNetworkImage(
+                      imageUrl: url,
+                      httpHeaders: ImageHeaderService.instance.headers,
+                      cacheManager: JavBusPostImageCacheManager(),
+                      fit: BoxFit.contain,
+                      placeholder: (context, url) => Container(
+                          color: theme.colorScheme.surfaceContainerHighest),
+                      errorWidget: (context, url, error) => Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.broken_image_outlined,
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              '图片加载失败，点击打开原图',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ],
-                  ),
-                ),
-              ),
+                    ),
             ),
           ),
         ),
@@ -1299,12 +1460,14 @@ class JavBusImagePreviewDialog extends StatelessWidget {
 
   final String url;
 
-  static Map<String, String> get httpHeaders => ImageHeaderService.instance.headers;
+  static Map<String, String> get httpHeaders =>
+      ImageHeaderService.instance.headers;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final semanticColors = theme.appSemanticColors;
+    final localFile = ThreadContentCacheService.instance.getImageFile(url);
     return Dialog.fullscreen(
       backgroundColor: semanticColors.imagePreviewBackground,
       child: Stack(
@@ -1316,23 +1479,25 @@ class JavBusImagePreviewDialog extends StatelessWidget {
                 minScale: 0.5,
                 maxScale: 5,
                 child: Center(
-                  child: CachedNetworkImage(
-                    imageUrl: url,
-                    httpHeaders: httpHeaders,
-                    cacheManager: JavBusPostImageCacheManager(),
-                    fit: BoxFit.contain,
-                    placeholder: (context, url) =>
-                        const SizedBox.shrink(),
-                    errorWidget: (context, url, error) => Center(
-                      child: Text(
-                        '原图加载失败',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: semanticColors.imagePreviewForeground
-                              .withValues(alpha: 0.72),
+                  child: localFile != null
+                      ? Image.file(localFile, fit: BoxFit.contain)
+                      : CachedNetworkImage(
+                          imageUrl: url,
+                          httpHeaders: httpHeaders,
+                          cacheManager: JavBusPostImageCacheManager(),
+                          fit: BoxFit.contain,
+                          placeholder: (context, url) =>
+                              const SizedBox.shrink(),
+                          errorWidget: (context, url, error) => Center(
+                            child: Text(
+                              '原图加载失败',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: semanticColors.imagePreviewForeground
+                                    .withValues(alpha: 0.72),
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
-                  ),
                 ),
               ),
             ),
@@ -1477,6 +1642,13 @@ double _previewWidth(double maxWidth) {
 const _postMediaPreviewHeight = JavBusLayout.mediaPreviewHeight;
 const _inlineEmojiSize = JavBusLayout.inlineEmojiSize;
 
+/// 屏蔽论坛签名装饰图（如分割线 hrline.gif）
+///
+/// 这类图片仅为视觉装饰，无实际内容，屏蔽后可提升阅读体验。
+bool _isBlockedImageUrl(String resolvedUrl) {
+  return resolvedUrl.contains('/static/image/hrline/');
+}
+
 bool _isInlineEmojiImage(dom.Element element, String resolvedUrl) {
   final classes = element.classes.join(' ').toLowerCase();
   final rawSrc = element.attributes['src']?.toLowerCase() ?? '';
@@ -1516,28 +1688,30 @@ class _PostAvatar extends StatelessWidget {
       );
     }
 
+    final localFile = ThreadContentCacheService.instance.getImageFile(url);
     return SizedBox(
       width: size,
       height: size,
       child: ClipOval(
-        child: CachedNetworkImage(
-          imageUrl: url,
-          httpHeaders: ImageHeaderService.instance.headers,
-          cacheManager: JavBusAvatarCacheManager(),
-          fit: BoxFit.cover,
-          placeholder: (context, url) => Container(
-            color: theme.colorScheme.primaryContainer,
-          ),
-          errorWidget: (context, url, error) => CircleAvatar(
-            radius: size / 2,
-            backgroundColor: theme.colorScheme.primaryContainer,
-            child: Icon(
-              Icons.person_outline_rounded,
-              size: 28,
-              color: theme.colorScheme.onPrimaryContainer,
-            ),
-          ),
-        ),
+        child: localFile != null
+            ? Image.file(localFile, fit: BoxFit.cover)
+            : CachedNetworkImage(
+                imageUrl: url,
+                httpHeaders: ImageHeaderService.instance.headers,
+                cacheManager: JavBusAvatarCacheManager(),
+                fit: BoxFit.cover,
+                placeholder: (context, url) =>
+                    Container(color: theme.colorScheme.primaryContainer),
+                errorWidget: (context, url, error) => CircleAvatar(
+                  radius: size / 2,
+                  backgroundColor: theme.colorScheme.primaryContainer,
+                  child: Icon(
+                    Icons.person_outline_rounded,
+                    size: 28,
+                    color: theme.colorScheme.onPrimaryContainer,
+                  ),
+                ),
+              ),
       ),
     );
   }
@@ -1600,67 +1774,69 @@ class _CommentSectionState extends State<_CommentSection> {
                 ),
               ),
               const SizedBox(height: 4),
-              ...visible.map((comment) => Padding(
-                padding: const EdgeInsets.only(top: 5),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: _CommentAvatar(avatarUrl: comment.avatarUrl),
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  comment.author,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: baseStyle?.copyWith(
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                              ),
-                              if (comment.authorId != null &&
-                                  comment.authorId ==
-                                      widget.threadAuthorId) ...[
-                                const SizedBox(width: 6),
-                                const _AuthorBadge(label: '楼主'),
-                              ],
-                            ],
-                          ),
-                          SelectionArea(
-                            child: Text(
-                              comment.content,
-                              style: baseStyle,
-                            ),
-                          ),
-                        ],
+              ...visible.map(
+                (comment) => Padding(
+                  padding: const EdgeInsets.only(top: 5),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: _CommentAvatar(avatarUrl: comment.avatarUrl),
                       ),
-                    ),
-                    if (comment.createdAt != null) ...[
-                      const SizedBox(width: 12),
-                      SizedBox(
-                        width: 150,
-                        child: Text(
-                          _formatCommentTime(comment.createdAt!),
-                          textAlign: TextAlign.right,
-                          style: baseStyle?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant
-                                .withValues(alpha: 0.72),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(minWidth: 120),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      comment.author,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: baseStyle?.copyWith(
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                  if (comment.authorId != null &&
+                                      comment.authorId ==
+                                          widget.threadAuthorId) ...[
+                                    const SizedBox(width: 6),
+                                    const _AuthorBadge(label: '楼主'),
+                                  ],
+                                ],
+                              ),
+                              SelectionArea(
+                                child: Text(comment.content, style: baseStyle),
+                              ),
+                            ],
                           ),
                         ),
                       ),
+                      if (comment.createdAt != null) ...[
+                        const SizedBox(width: 12),
+                        SizedBox(
+                          width: JavBusLayout.postMetaColumnWidth,
+                          child: Text(
+                            _formatCommentTime(comment.createdAt!),
+                            textAlign: TextAlign.right,
+                            style: baseStyle?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant
+                                  .withValues(alpha: 0.72),
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
-              )),
+              ),
               if (hasMore)
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
@@ -1701,6 +1877,13 @@ class _CommentAvatar extends StatelessWidget {
         Icons.person_outline_rounded,
         size: size,
         color: theme.colorScheme.onSurfaceVariant,
+      );
+    }
+
+    final localFile = ThreadContentCacheService.instance.getImageFile(avatarUrl!);
+    if (localFile != null) {
+      return ClipOval(
+        child: Image.file(localFile, width: size, height: size, fit: BoxFit.cover),
       );
     }
 

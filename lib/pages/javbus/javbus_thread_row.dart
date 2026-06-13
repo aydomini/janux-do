@@ -84,10 +84,10 @@ class ThreadRow extends StatelessWidget {
                 isSearchResult
                     ? Icons.search_rounded
                     : thread.isPinned
-                        ? Icons.push_pin_rounded
-                        : thread.hasAttachment
-                            ? Icons.attach_file_rounded
-                            : Icons.chat_bubble_outline_rounded,
+                    ? Icons.push_pin_rounded
+                    : thread.hasAttachment
+                    ? Icons.attach_file_rounded
+                    : Icons.chat_bubble_outline_rounded,
                 size: 18,
                 color: thread.isPinned && !isSearchResult
                     ? theme.colorScheme.primary
@@ -96,69 +96,70 @@ class ThreadRow extends StatelessWidget {
             ),
             const SizedBox(width: 18),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    thread.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  if (isSearchResult && thread.excerpt != null) ...[
-                    const SizedBox(height: 5),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minWidth: 240),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                     Text(
-                      thread.excerpt!,
-                      maxLines: 3,
+                      thread.title,
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                        height: 1.45,
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
+                    if (isSearchResult && thread.excerpt != null) ...[
+                      const SizedBox(height: 5),
+                      Text(
+                        thread.excerpt!,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                          height: 1.45,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 6),
+                    if (isSearchResult)
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: [
+                          if (thread.forumName != null)
+                            _MutedMeta(
+                              icon: Icons.folder_outlined,
+                              label: thread.forumName!,
+                            ),
+                          _MutedMeta(
+                            icon: Icons.person_outline_rounded,
+                            label: thread.author,
+                          ),
+                        ],
+                      )
+                    else
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: [
+                          _MutedMeta(
+                            icon: Icons.person_outline_rounded,
+                            label: thread.author,
+                          ),
+                          if (thread.isPinned) const _SmallBadge(label: '置顶'),
+                          if (thread.isDigest) const _SmallBadge(label: '精华'),
+                          if (thread.hasAttachment)
+                            const _SmallBadge(label: '附件'),
+                          if (thread.createdAt != null)
+                            _MutedMeta(
+                              icon: Icons.calendar_today_outlined,
+                              label: _formatCreatedDate(thread.createdAt!),
+                            ),
+                        ],
+                      ),
                   ],
-                  const SizedBox(height: 6),
-                  if (isSearchResult)
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 4,
-                      children: [
-                        if (thread.forumName != null)
-                          _MutedMeta(
-                            icon: Icons.folder_outlined,
-                            label: thread.forumName!,
-                          ),
-                        _MutedMeta(
-                          icon: Icons.person_outline_rounded,
-                          label: thread.author,
-                        ),
-                      ],
-                    )
-                  else
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 4,
-                      children: [
-                        _MutedMeta(
-                          icon: Icons.person_outline_rounded,
-                          label: thread.author,
-                        ),
-                        if (thread.isPinned)
-                          const _SmallBadge(label: '置顶'),
-                        if (thread.isDigest)
-                          const _SmallBadge(label: '精华'),
-                        if (thread.hasAttachment)
-                          const _SmallBadge(label: '附件'),
-                        if (thread.createdAt != null)
-                          _MutedMeta(
-                            icon: Icons.calendar_today_outlined,
-                            label: _formatCreatedDate(thread.createdAt!),
-                          ),
-                      ],
-                    ),
-                ],
+                ),
               ),
             ),
             const SizedBox(width: 18),

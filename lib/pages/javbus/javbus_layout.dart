@@ -9,7 +9,7 @@ class JavBusLayout {
   static const double textContentMaxWidth = 720;
   static const double contentHorizontalPadding = 24;
   static const double listHorizontalPadding = 24;
-  static const double postMetaColumnWidth = 150;
+  static const double postMetaColumnWidth = 120;
   static const double topicReplyColumnWidth = 120;
   static const double topicViewsColumnWidth = 120;
   static const double topicTimeColumnWidth = 120;

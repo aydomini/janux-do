@@ -1,4 +1,5 @@
 import 'forum_forum.dart';
+import 'forum_poll.dart';
 import 'forum_post.dart';
 import 'forum_thread.dart';
 
@@ -52,6 +53,7 @@ class PostListResult {
     required this.hasNextPage,
     required this.threadTitle,
     this.threadAuthorId,
+    this.poll,
   });
 
   final List<ForumPost> posts;
@@ -63,4 +65,8 @@ class PostListResult {
   /// 楼主 (1#) 的 authorId，用于跨页标签匹配。
   /// 优先从 .nthread_info header 提取，回退到第一帖 authorId。
   final int? threadAuthorId;
+
+  /// 投票数据（仅帖子包含投票时非 null）。
+  /// 仅在首页存在，由 `<form id="poll">` 中解析。
+  final ForumPoll? poll;
 }

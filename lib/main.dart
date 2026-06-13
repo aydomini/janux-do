@@ -17,6 +17,8 @@ import 'services/network/cookie/cookie_jar_service.dart';
 import 'services/data_management/cache_size_service.dart';
 import 'services/favorites_service.dart';
 import 'services/forum_cache_service.dart';
+import 'services/search_cache_service.dart';
+import 'services/thread_content_cache_service.dart';
 import 'services/javbus_cache_manager.dart';
 import 'l10n/s.dart';
 
@@ -73,6 +75,8 @@ Future<void> main() async {
     CsrfTokenService().init(),
     FavoritesService.instance.init(),
     ForumCacheService.instance.init(),
+    SearchCacheService.instance.init(),
+    ThreadContentCacheService.instance.init(),
     TimeUtils.initialize(),
   ];
   // 桌面平台初始化 window_manager 和 flutter_acrylic

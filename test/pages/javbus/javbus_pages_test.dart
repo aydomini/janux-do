@@ -211,7 +211,7 @@ void main() {
     expect(JavBusLayout.compactBreakpoint, 860);
     expect(JavBusLayout.sidebarWidth, 300);
     expect(JavBusLayout.contentMaxWidth, 920);
-    expect(JavBusLayout.postMetaColumnWidth, 150);
+    expect(JavBusLayout.postMetaColumnWidth, 120);
     expect(JavBusLayout.topicReplyColumnWidth, 120);
     expect(JavBusLayout.topicViewsColumnWidth, 120);
     expect(JavBusLayout.topicTimeColumnWidth, 120);

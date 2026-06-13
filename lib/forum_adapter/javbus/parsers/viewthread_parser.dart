@@ -3,6 +3,7 @@ import 'package:html/parser.dart' as html_parser;
 
 import '../../../forum_adapter/exceptions.dart';
 import '../../../forum_adapter/models/forum_attachment.dart';
+import '../../../forum_adapter/models/forum_poll.dart';
 import '../../../forum_adapter/models/forum_post.dart';
 import '../../../forum_adapter/models/forum_results.dart';
 import '../utils/time_parser.dart';
@@ -133,6 +134,7 @@ class ViewThreadParser {
     }
 
     final pagination = _extractPagination(document);
+    final poll = _extractPoll(document);
     return PostListResult(
       posts: posts,
       currentPage: pagination.currentPage,
@@ -140,6 +142,7 @@ class ViewThreadParser {
       hasNextPage: pagination.hasNextPage,
       threadTitle: _extractTitle(document),
       threadAuthorId: threadAuthorId,
+      poll: poll,
     );
   }
 
@@ -905,6 +908,129 @@ bool _isPaginationElement(Element element) {
   return element.classes.contains('pg') ||
       element.classes.contains('page') ||
       element.querySelector('.pg') != null;
+}
+
+ForumPoll? _extractPoll(Document document) {
+  final pollForm = document.querySelector('form#poll');
+  if (pollForm == null) return null;
+
+  // 提取 .pinf 中的投票元信息
+  final pinf = pollForm.querySelector('.pinf');
+  final pinfText = pinf?.text ?? '';
+
+  // 判断是否多选
+  final isMultiple = pinfText.contains('多選') ||
+      pinfText.contains('多选');
+
+  // 提取最多可选项数
+  final maxChoicesMatch = RegExp(r'最多可選\s*(\d+)\s*項').firstMatch(pinfText);
+  final maxChoices = maxChoicesMatch != null
+      ? int.tryParse(maxChoicesMatch.group(1)!)
+      : null;
+
+  // 提取总投票人数
+  final totalVotersMatch = RegExp(r'共有\s*(\d+)\s*人參與投票').firstMatch(pinfText);
+  final totalVoters = totalVotersMatch != null
+      ? int.tryParse(totalVotersMatch.group(1)!) ?? 0
+      : 0;
+
+  // 判断投票是否已结束
+  final ptmr = pollForm.querySelector('.ptmr');
+  final isClosed = ptmr?.text.contains('投票已經結束') ?? false;
+
+  // 判断当前用户是否已投票（标签被移除 + 存在已投票提示）
+  final pinfHasVoted = pinfText.contains('您已经投过票') ||
+      pinfText.contains('您已經投過票');
+  final noInputInPcht = pollForm.querySelector('.pcht input[type="radio"]') == null &&
+      pollForm.querySelector('.pcht input[type="checkbox"]') == null;
+  final hasVoted = isClosed || (!noInputInPcht ? pinfHasVoted : false);
+
+  // 解析选项
+  final options = <PollOption>[];
+  final rows = pollForm.querySelectorAll('.pcht tbody tr');
+  for (var i = 0; i < rows.length; i++) {
+    final row = rows[i];
+    final label = row.querySelector('.pvt label');
+    if (label == null) continue;
+
+    // 提取选项序号和文本（格式：N. &nbsp;文本）
+    final labelText = label.text.trim();
+    final optionMatch = RegExp(r'^(\d+)\.\s*').firstMatch(labelText);
+    final optionIndex = optionMatch != null
+        ? int.tryParse(optionMatch.group(1)!) ?? (options.length + 1)
+        : options.length + 1;
+    final optionText =
+        labelText.replaceFirst(RegExp(r'^\d+\.\s*'), '').trim();
+
+    // 下一行包含票数/百分比/颜色
+    int votes = 0;
+    double? percentage;
+    String? color;
+
+    if (i + 1 < rows.length) {
+      final nextRow = rows[i + 1];
+      final rowText = nextRow.text;
+
+      // 提取精确百分比：优先从文本中解析（如 "9.48% (185)"）
+      // CSS width 是进度条的取整视觉效果，不可用于精确值
+      final pctMatch = RegExp(r'([\d.]+)%').firstMatch(rowText);
+      if (pctMatch != null) {
+        percentage = double.tryParse(pctMatch.group(1)!);
+      }
+
+      // 提取票数：从 <em> 或行文本
+      final emVotes = nextRow.querySelector('em');
+      final emText = emVotes?.text ?? '';
+      final voteMatch = RegExp(r'\((\d+)\)').firstMatch(emText);
+      if (voteMatch != null) {
+        votes = int.tryParse(voteMatch.group(1)!) ?? 0;
+      }
+      if (votes == 0) {
+        final fallbackMatch = RegExp(r'\((\d+)\)').firstMatch(rowText);
+        if (fallbackMatch != null) {
+          votes = int.tryParse(fallbackMatch.group(1)!) ?? 0;
+        }
+      }
+
+      // 提取进度条颜色：从 .pbr 的 style 属性或 <em> 的 style 属性
+      final pbr = nextRow.querySelector('.pbr');
+      if (pbr != null) {
+        final styleAttr = pbr.attributes['style'] ?? '';
+        final colorMatch =
+            RegExp(r'background-color:\s*([#\w]+)').firstMatch(styleAttr);
+        color = colorMatch?.group(1);
+      }
+      // 如果 CSS width 也未提取到百分比，回退到 CSS width
+      if (percentage == null && pbr != null) {
+        final styleAttr = pbr.attributes['style'] ?? '';
+        final widthMatch = RegExp(r'width:\s*([\d.]+)%').firstMatch(styleAttr);
+        if (widthMatch != null) {
+          percentage = double.tryParse(widthMatch.group(1)!);
+        }
+      }
+    }
+
+    options.add(
+      PollOption(
+        index: optionIndex,
+        text: optionText,
+        votes: votes,
+        percentage: percentage,
+        color: color,
+      ),
+    );
+  }
+
+  if (options.isEmpty) return null;
+
+  return ForumPoll(
+    isMultiple: isMultiple,
+    maxChoices: maxChoices,
+    totalVoters: totalVoters,
+    isClosed: isClosed,
+    hasVoted: hasVoted,
+    options: options,
+  );
 }
 
 class _PostScope {

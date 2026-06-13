@@ -234,6 +234,101 @@ void main() {
       expect(result.posts.last.contentHtml, contains('XHTML 回复正文'));
     });
 
+    group('投票解析', () {
+      test('解析桌面版已结束的多选投票', () {
+        final html = File(
+          'test/fixtures/javbus/viewthread_with_poll.html',
+        ).readAsStringSync();
+        final result = parser.parse(html, threadId: 801);
+
+        expect(result.threadTitle, '投票帖标题');
+        expect(result.posts, hasLength(2));
+        expect(result.posts.first.author, '投票楼主');
+
+        // 验证投票数据
+        final poll = result.poll;
+        expect(poll, isNotNull);
+        expect(poll!.isMultiple, isTrue);
+        expect(poll.maxChoices, 3);
+        expect(poll.totalVoters, 150);
+        expect(poll.isClosed, isTrue);
+        expect(poll.hasVoted, isTrue); // 已关闭的投票隐含已投票状态
+
+        // 验证选项
+        expect(poll.options, hasLength(3));
+
+        expect(poll.options[0].index, 1);
+        expect(poll.options[0].text, '选项 A');
+        expect(poll.options[0].votes, 60);
+        expect(poll.options[0].percentage, closeTo(40.0, 0.01));
+        expect(poll.options[0].color, '#E92725');
+
+        expect(poll.options[1].index, 2);
+        expect(poll.options[1].text, '选项 B');
+        expect(poll.options[1].votes, 50);
+        expect(poll.options[1].percentage, closeTo(33.33, 0.01));
+        expect(poll.options[1].color, '#F27B21');
+
+        expect(poll.options[2].index, 3);
+        expect(poll.options[2].text, '选项 C');
+        expect(poll.options[2].votes, 40);
+        expect(poll.options[2].percentage, closeTo(26.67, 0.01));
+        expect(poll.options[2].color, '#5AAF4A');
+      });
+
+      test('无投票帖子的 poll 字段为 null', () {
+        final html = File(
+          'test/fixtures/javbus/viewthread_discuz_desktop.html',
+        ).readAsStringSync();
+        final result = parser.parse(html, threadId: 1006);
+
+        expect(result.poll, isNull);
+        expect(result.posts, isNotEmpty);
+      });
+
+      test('解析真实 JavBus 投票帖（tid=171529，17 选项）', () {
+        final html = File(
+          'test/fixtures/javbus/viewthread_with_poll_real.html',
+        ).readAsStringSync();
+        final result = parser.parse(html, threadId: 171529);
+
+        final poll = result.poll;
+        expect(poll, isNotNull);
+        expect(poll!.isMultiple, isTrue);
+        expect(poll.maxChoices, 15);
+        expect(poll.totalVoters, 927);
+        expect(poll.isClosed, isTrue);
+
+        // 17 个选项
+        expect(poll.options, hasLength(17));
+        expect(poll.options[0].index, 1);
+        expect(poll.options[0].text, contains('啥也不用'));
+        expect(poll.options[0].votes, 185);
+        expect(poll.options[0].percentage, closeTo(9.48, 0.01));
+
+        expect(poll.options[16].index, 17);
+        expect(poll.options[16].text, contains('没有伴侣'));
+        expect(poll.options[16].votes, 193);
+        expect(poll.options[16].percentage, closeTo(9.89, 0.01));
+
+        // 投票帖也应正常解析帖子
+        expect(result.posts, isNotEmpty);
+        expect(result.threadTitle, isNotEmpty);
+      });
+
+      test('无投票时 posts 解析不受影响', () {
+        final html = File(
+          'test/fixtures/javbus/viewthread_single_page.html',
+        ).readAsStringSync();
+        final result = parser.parse(html, threadId: 1002);
+
+        expect(result.poll, isNull);
+        expect(result.threadTitle, '普通主题');
+        expect(result.posts, hasLength(2));
+        expect(result.posts.first.author, '楼主');
+      });
+    });
+
     test('解析 JavBus XHTML Mobile 楼层头和正文分离结构', () {
       final html = File(
         'test/fixtures/javbus/viewthread_javbus_xhtml_mobile_split.html',

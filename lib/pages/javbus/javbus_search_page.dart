@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../forum_adapter/models/forum_thread.dart';
 import '../../providers/forum_provider.dart';
+import '../../services/search_cache_service.dart';
 import '../../widgets/common/error_view.dart';
 import 'javbus_layout.dart';
 import 'javbus_thread_page.dart';
@@ -114,7 +116,8 @@ class _JavBusSearchPageState extends ConsumerState<JavBusSearchPage> {
     _scrollController.addListener(_onScroll);
     _restoreFromCache();
     _loadHistory();
-    if (!_cache.hasLoaded) {
+    SearchCacheService.instance.init();
+    if (!_cache.hasLoaded && !_hasLoadedFromDiskCache) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _searchFocus.requestFocus();
       });
@@ -132,27 +135,59 @@ class _JavBusSearchPageState extends ConsumerState<JavBusSearchPage> {
   }
 
   void _restoreFromCache() {
-    if (!_cache.hasLoaded) return;
-    _threads = List.of(_cache.threads);
-    _currentPage = _cache.currentPage;
-    _totalPages = _cache.totalPages;
-    _totalResults = _cache.totalResults;
-    _hasNextPage = _cache.hasNextPage;
-    _lastKeyword = _cache.lastKeyword;
-    _searchId = _cache.searchId;
-    if (_lastKeyword != null) {
-      _searchController.text = _lastKeyword!;
-    }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scrollController.hasClients) return;
-      final maxOffset = _scrollController.position.maxScrollExtent;
-      if (maxOffset > 0) {
-        _scrollController.jumpTo(
-          _cache.scrollOffset.clamp(0, maxOffset),
-        );
+    // 优先使用会话内缓存（切换分区保留），其次使用跨重启持久化缓存
+    if (_cache.hasLoaded) {
+      _threads = List.of(_cache.threads);
+      _currentPage = _cache.currentPage;
+      _totalPages = _cache.totalPages;
+      _totalResults = _cache.totalResults;
+      _hasNextPage = _cache.hasNextPage;
+      _lastKeyword = _cache.lastKeyword;
+      _searchId = _cache.searchId;
+      if (_lastKeyword != null) {
+        _searchController.text = _lastKeyword!;
       }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_scrollController.hasClients) return;
+        final maxOffset = _scrollController.position.maxScrollExtent;
+        if (maxOffset > 0) {
+          _scrollController.jumpTo(
+            _cache.scrollOffset.clamp(0, maxOffset),
+          );
+        }
+      });
+      return;
+    }
+
+    // 跨重启：从 SharedPreferences 恢复 24h 内缓存
+    final diskCache = SearchCacheService.instance.load();
+    if (diskCache == null) return;
+    setState(() {
+      _threads = diskCache.threads;
+      _currentPage = diskCache.currentPage;
+      _totalPages = diskCache.totalPages;
+      _totalResults = diskCache.totalResults;
+      _hasNextPage = diskCache.hasNextPage;
+      _lastKeyword = diskCache.keyword;
+      _searchId = diskCache.searchId;
     });
+    _searchController.text = diskCache.keyword;
+    // 同步写入会话缓存
+    _cache
+      ..threads.addAll(diskCache.threads)
+      ..currentPage = diskCache.currentPage
+      ..totalPages = diskCache.totalPages
+      ..totalResults = diskCache.totalResults
+      ..hasNextPage = diskCache.hasNextPage
+      ..lastKeyword = diskCache.keyword
+      ..searchId = diskCache.searchId
+      ..hasLoaded = true;
+    // 标记已从持久化缓存恢复，避免自动聚焦搜索框
+    _hasLoadedFromDiskCache = true;
   }
+
+  /// 是否从持久化缓存恢复了数据（用于跳过自动聚焦）
+  bool _hasLoadedFromDiskCache = false;
 
   void _saveToCache() {
     _cache.threads
@@ -195,6 +230,7 @@ class _JavBusSearchPageState extends ConsumerState<JavBusSearchPage> {
       ..hasLoaded = false
       ..lastKeyword = null
       ..threads.clear();
+    unawaited(SearchCacheService.instance.clear());
   }
 
   void _onScroll() {
@@ -248,6 +284,17 @@ class _JavBusSearchPageState extends ConsumerState<JavBusSearchPage> {
         _searchId = result.searchId;
         _isSearching = false;
       });
+      // 持久化搜索结果至磁盘（24h 有效）
+      unawaited(SearchCacheService.instance.save(SearchCacheData(
+        keyword: kw,
+        threads: _threads,
+        currentPage: _currentPage,
+        totalPages: _totalPages,
+        totalResults: _totalResults,
+        hasNextPage: _hasNextPage,
+        searchId: _searchId,
+        cachedAt: DateTime.now(),
+      )));
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -284,6 +331,19 @@ class _JavBusSearchPageState extends ConsumerState<JavBusSearchPage> {
         _isLoadingMore = false;
         _error = null;
       });
+      // 更新持久化缓存以包含全部已加载页
+      if (_lastKeyword != null) {
+        unawaited(SearchCacheService.instance.save(SearchCacheData(
+          keyword: _lastKeyword!,
+          threads: _threads,
+          currentPage: _currentPage,
+          totalPages: _totalPages,
+          totalResults: _totalResults,
+          hasNextPage: _hasNextPage,
+          searchId: _searchId,
+          cachedAt: DateTime.now(),
+        )));
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
