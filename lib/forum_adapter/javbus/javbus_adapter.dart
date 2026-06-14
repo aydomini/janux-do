@@ -295,7 +295,7 @@ class JavbusAdapter extends ForumAdapter {
               allComments.putIfAbsent(mc.key, () => []).addAll(mc.value);
             }
             final morePagination =
-                ViewThreadParser.parseCommentPagination(moreHtml);
+                ViewThreadParser.parseCommentPagination(moreHtml, knownPid: pid);
             final nextMax = morePagination[pid];
             if (nextMax != null && nextMax > maxPage) {
               maxPage = nextMax;

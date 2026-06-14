@@ -1840,15 +1840,22 @@ class _CommentSectionState extends State<_CommentSection> {
               if (hasMore)
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
-                  child: GestureDetector(
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(4),
                     onTap: () => setState(() => _expanded = !_expanded),
-                    child: Text(
-                      _expanded
-                          ? '收起'
-                          : '展开剩余 ${all.length - _previewCount} 条点评',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.primary,
-                        fontWeight: FontWeight.w600,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 2,
+                      ),
+                      child: Text(
+                        _expanded
+                            ? '收起'
+                            : '展开剩余 ${all.length - _previewCount} 条点评',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ),

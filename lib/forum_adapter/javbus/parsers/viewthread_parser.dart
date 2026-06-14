@@ -546,7 +546,10 @@ class ViewThreadParser {
   /// 从 viewthread 桌面版 HTML 中提取点评分页信息
   /// 返回 `Map<pid, 总页数>`，仅包含有超过 1 页的帖子
   /// 反向查找：从 .pgs 出发，向上/向前找到最近的 comment_XXX
-  static Map<int, int> parseCommentPagination(String html) {
+  ///
+  /// [knownPid] 用于 commentMore AJAX 响应：该响应不含 comment_XXX 外层容器，
+  /// 无法通过父级推断 pid，此时用此参数作为回退。
+  static Map<int, int> parseCommentPagination(String html, {int? knownPid}) {
     final document = html_parser.parse(html);
     final results = <int, int>{};
     for (final pgBar in document.querySelectorAll('.pgs')) {
@@ -555,8 +558,13 @@ class ViewThreadParser {
       // 提取最大页码
       var maxPage = 1;
       for (final link in pg.querySelectorAll('a')) {
+        // viewthread 页面使用 onclick="ajaxget(...page=N...)" 格式
+        // commentMore AJAX 响应使用 href="...&page=N" 格式，两者均需检查
         final onclick = link.attributes['onclick'] ?? '';
-        final pageMatch = RegExp(r'[&?]page=(\d+)').firstMatch(onclick);
+        final href = link.attributes['href'] ?? '';
+        final pageMatch =
+            RegExp(r'[&?]page=(\d+)').firstMatch(onclick) ??
+            RegExp(r'[&?]page=(\d+)').firstMatch(href);
         if (pageMatch != null) {
           final page = int.parse(pageMatch.group(1)!);
           if (page > maxPage) maxPage = page;
@@ -564,7 +572,8 @@ class ViewThreadParser {
       }
       if (maxPage <= 1) continue;
       // 反向查找最近的 comment_XXX：先查子节点，再向前兄弟，最后向上
-      final pid = _findNearestCommentPid(pgBar);
+      // AJAX 响应无 comment_XXX 容器时回退到 knownPid
+      final pid = _findNearestCommentPid(pgBar) ?? knownPid;
       if (pid != null) results[pid] = maxPage;
     }
     return results;
