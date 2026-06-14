@@ -287,7 +287,7 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
     }
   }
 
-  /// 增量合并点评：已有帖子 ID 的点评保留不动，仅追加新帖子 ID 的点评。
+  /// 增量合并点评：从网络取回的数据为权威来源，覆盖已有同帖 ID 的点评。
   Future<void> _mergeComments(int page) async {
     if (!_loadedCommentPages.add(page)) return;
     try {
@@ -295,13 +295,7 @@ class _JavBusThreadContentState extends ConsumerState<JavBusThreadContent> {
           .read(forumAdapterProvider)
           .getComments(widget.threadId, page: page);
       if (!mounted) return;
-      setState(() {
-        for (final entry in comments.entries) {
-          if (!_comments.containsKey(entry.key)) {
-            _comments[entry.key] = entry.value;
-          }
-        }
-      });
+      setState(() => _comments.addAll(comments));
     } catch (_) {
       _loadedCommentPages.remove(page);
     }
